@@ -16,6 +16,31 @@ import shutil
 import subprocess
 from pathlib import Path
 
+
+def _validate_build_environment() -> bool:
+    """Validate required modules exist before building the executable."""
+    required_modules = [
+        ("PyQt6", "PyQt6"),
+        ("qasync", "qasync"),
+        ("playwright.async_api", "playwright"),
+    ]
+
+    missing = []
+    for module_name, package_name in required_modules:
+        try:
+            __import__(module_name)
+        except Exception:
+            missing.append(package_name)
+
+    if missing:
+        unique_missing = sorted(set(missing))
+        print("\n❌ Entorno incompleto para compilar.")
+        print(f"   Faltan paquetes: {', '.join(unique_missing)}")
+        print("   Ejecuta: python -m pip install -r requirements.txt")
+        return False
+
+    return True
+
 def main():
     """Build the executable"""
     
@@ -30,6 +55,9 @@ def main():
     print("EarnApp Reviewer - Build Script")
     print("=" * 60)
     print(f"Working directory: {project_dir}\n")
+
+    if not _validate_build_environment():
+        return 1
     
     # Check if main.py exists
     if not Path(main_py).exists():

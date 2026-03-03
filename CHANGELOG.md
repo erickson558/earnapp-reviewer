@@ -5,6 +5,15 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-03-03
+
+### 🐛 Fixed
+- Corregida la causa raíz del error `ModuleNotFoundError: No module named 'qasync'` al compilar desde entornos incompletos
+
+### 🔧 Build
+- `build.py` ahora valida dependencias críticas (`PyQt6`, `qasync`, `playwright`) antes de ejecutar PyInstaller
+- Si falta alguna dependencia, la compilación se detiene con instrucción clara para instalar `requirements.txt`
+
 ## [1.1.3] - 2026-03-03
 
 ### 🐛 Fixed
