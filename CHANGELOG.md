@@ -5,6 +5,20 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-03-03
+
+### ✨ Added
+- Preview en tiempo real con actualización automática (debounce) al cambiar URL o lista
+- Preview renderizado en navegador real (Playwright) con URL final, estado, título, extracto y miniatura en una sola carga
+
+### 🐛 Fixed
+- Corregido problema de preview que mostraba solo Login al usar previsualización basada en `requests`
+- El botón de preview ya no se bloquea mientras carga; el preview permanece siempre disponible
+
+### 🔧 Technical
+- Nuevo método backend `get_live_url_preview()` para obtener contenido renderizado y screenshot desde la misma sesión
+- Fallback automático a `chrome/msedge` del sistema si Chromium local no está disponible
+
 ## [1.3.0] - 2026-03-03
 
 ### ✨ Added

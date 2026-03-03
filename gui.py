@@ -16,7 +16,7 @@ import qasync
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QPushButton, QSpinBox, QCheckBox,
-    QGroupBox, QStatusBar, QMenuBar, QMessageBox, QScrollArea
+    QGroupBox, QStatusBar, QMenuBar, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QPixmap
@@ -119,6 +119,14 @@ class MainWindow(QMainWindow):
         self.auto_close_timer = QTimer()
         self.auto_close_timer.timeout.connect(self.countdown_tick)
         self.auto_close_countdown = 0
+
+        # Realtime preview state
+        self._preview_loading = False
+        self._pending_preview_url: Optional[str] = None
+        self._last_preview_url = ""
+        self.preview_debounce_timer = QTimer()
+        self.preview_debounce_timer.setSingleShot(True)
+        self.preview_debounce_timer.timeout.connect(self.preview_current_url)
         
         # UI Setup
         self.init_ui()
@@ -303,6 +311,7 @@ class MainWindow(QMainWindow):
             lambda: self.config_manager.set('urls', self.urls_text.toPlainText())
         )
         self.urls_text.textChanged.connect(self.sync_preview_url_from_list)
+        self.urls_text.textChanged.connect(lambda: self.schedule_preview_refresh(450))
         urls_layout.addWidget(self.urls_text)
         urls_group.setLayout(urls_layout)
         main_layout.addWidget(urls_group)
@@ -316,6 +325,7 @@ class MainWindow(QMainWindow):
 
         self.preview_url_input = QLineEdit()
         self.preview_url_input.setPlaceholderText("Selecciona o pega una URL para previsualizar")
+        self.preview_url_input.textChanged.connect(self.on_preview_url_changed)
         preview_controls.addWidget(self.preview_url_input)
 
         self.preview_btn = QPushButton("Preview")
@@ -369,6 +379,7 @@ class MainWindow(QMainWindow):
         )
 
         self.sync_preview_url_from_list()
+        self.schedule_preview_refresh(250)
     
     def create_menu_bar(self):
         """Create menu bar."""
@@ -447,12 +458,18 @@ class MainWindow(QMainWindow):
         urls = self.backend.normalize_urls(self.urls_text.toPlainText())
         if urls:
             self.preview_url_input.setText(urls[0])
+            self.schedule_preview_refresh(200)
+
+    def on_preview_url_changed(self, _text: str):
+        """Handle URL input changes and trigger realtime preview."""
+        self.schedule_preview_refresh(550)
+
+    def schedule_preview_refresh(self, delay_ms: int = 550):
+        """Schedule realtime preview update with debounce."""
+        self.preview_debounce_timer.start(delay_ms)
 
     def preview_current_url(self):
         """Trigger async preview for selected URL."""
-        if getattr(self, '_preview_loading', False):
-            return
-
         target_url = self.preview_url_input.text().strip()
         if not target_url:
             urls = self.backend.normalize_urls(self.urls_text.toPlainText())
@@ -464,32 +481,39 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("No hay URL para previsualizar")
             return
 
+        if self._preview_loading:
+            self._pending_preview_url = target_url
+            return
+
+        if target_url == self._last_preview_url:
+            return
+
         self._preview_loading = True
-        self.preview_btn.setEnabled(False)
+        self._pending_preview_url = None
+        self._last_preview_url = target_url
         self.preview_text.setPlainText("Cargando preview...")
         asyncio.ensure_future(self._load_preview_async(target_url))
 
     async def _load_preview_async(self, url: str):
         """Load URL preview without blocking the UI."""
         try:
-            # Load text preview
-            preview = await asyncio.to_thread(self.backend.get_url_preview, url)
+            preview = await self.backend.get_live_url_preview(url)
             preview_text = (
                 f"URL: {preview.get('url', '')}\n"
+                f"Final: {preview.get('final_url', '')}\n"
                 f"Estado: {preview.get('status', '')}\n"
                 f"Título: {preview.get('title', '')}\n\n"
                 f"{preview.get('snippet', '')}"
             )
             self.preview_text.setPlainText(preview_text)
-            
-            # Load screenshot
-            self.preview_image_label.setText("Capturando captura de pantalla...")
-            screenshot_bytes = await self.backend.get_url_screenshot(url, width=800, height=600)
-            
+
+            self.preview_image_label.setText("Cargando vista en miniatura...")
+            screenshot_bytes = preview.get('screenshot')
+
             if screenshot_bytes:
                 pixmap = QPixmap()
                 pixmap.loadFromData(screenshot_bytes)
-                
+
                 # Scale to fit label while maintaining aspect ratio
                 scaled_pixmap = pixmap.scaled(
                     self.preview_image_label.width() - 10,
@@ -508,7 +532,8 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Error en preview")
         finally:
             self._preview_loading = False
-            self.preview_btn.setEnabled(True)
+            if self._pending_preview_url and self._pending_preview_url != self._last_preview_url:
+                self.schedule_preview_refresh(120)
     
     def start_scan(self):
         """Start scanning process."""

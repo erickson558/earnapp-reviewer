@@ -15,7 +15,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Callable, Optional
+from typing import List, Dict, Callable, Optional, Any
 from urllib.parse import urlparse
 
 import requests
@@ -185,58 +185,114 @@ class ScannerBackend:
                 'snippet': str(e)
             }
 
-    async def get_url_screenshot(self, url: str, width: int = 800, height: int = 600) -> Optional[bytes]:
-        """
-        Capture a screenshot of the URL using Playwright.
-        
-        Args:
-            url: URL to capture
-            width: Viewport width for screenshot
-            height: Viewport height for screenshot
-            
-        Returns:
-            Screenshot as bytes (PNG format) or None if failed
-        """
+    async def get_live_url_preview(self, url: str, width: int = 900, height: int = 620) -> Dict[str, Any]:
+        """Load URL with Playwright and return text preview + screenshot bytes."""
         normalized_url = url.strip()
         if not normalized_url:
-            return None
+            return {
+                'url': '',
+                'final_url': '',
+                'status': 'ERROR',
+                'title': 'Sin URL',
+                'snippet': 'No se proporcionó URL para previsualizar.',
+                'screenshot': None
+            }
+
+        browser = None
+        context = None
 
         try:
+            self.ensure_playwright_browser()
             os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
-            
+
             async with async_playwright() as p:
-                # Try to launch browser
-                browser = None
+                launch_args = {
+                    'headless': True,
+                    'args': ['--disable-blink-features=AutomationControlled']
+                }
+
                 try:
-                    browser = await p.chromium.launch(headless=True)
-                except Exception:
-                    # Fallback to system browser
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        channel='chrome' if sys.platform == 'win32' else None
+                    browser = await p.chromium.launch(**launch_args)
+                except Exception as launch_error:
+                    self.log(
+                        "Preview: Chromium local no disponible, intentando navegador del sistema",
+                        'WARNING'
                     )
-                
+                    self.log(f"Preview detalle Chromium: {str(launch_error)}", 'WARNING')
+
+                    fallback_browser = None
+                    fallback_errors = []
+                    for channel in ('chrome', 'msedge'):
+                        try:
+                            fallback_browser = await p.chromium.launch(channel=channel, **launch_args)
+                            self.log(f"Preview usando canal del sistema: {channel}")
+                            break
+                        except Exception as channel_error:
+                            fallback_errors.append(f"{channel}: {str(channel_error)}")
+
+                    if fallback_browser is None:
+                        if fallback_errors:
+                            self.log(" | ".join(fallback_errors), 'ERROR')
+                        raise launch_error
+
+                    browser = fallback_browser
+
                 context = await browser.new_context(
-                    viewport={'width': width, 'height': height},
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    viewport={'width': width, 'height': height}
                 )
                 page = await context.new_page()
-                
-                # Navigate to URL with timeout
-                await page.goto(normalized_url, wait_until='domcontentloaded', timeout=15000)
-                
-                # Wait a bit for content to render
-                await asyncio.sleep(0.5)
-                
-                # Take screenshot
+                await page.add_init_script(
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+                )
+
+                response = await page.goto(normalized_url, wait_until='networkidle', timeout=30000)
+                await asyncio.sleep(1.0)
+
+                final_url = page.url
+                title = await page.title()
+                if not title:
+                    title = 'Sin título'
+
+                body_text = await page.text_content('body')
+                body_text = re.sub(r'\s+', ' ', (body_text or '')).strip()
+                snippet = body_text[:800] + ('...' if len(body_text) > 800 else '')
+                if not snippet:
+                    snippet = 'No se pudo extraer contenido legible de la página.'
+
+                status_code = response.status if response else 'N/A'
                 screenshot_bytes = await page.screenshot(type='png', full_page=False)
-                
-                await browser.close()
-                return screenshot_bytes
-                
+
+                return {
+                    'url': normalized_url,
+                    'final_url': final_url,
+                    'status': f"OK ({status_code})",
+                    'title': title,
+                    'snippet': snippet,
+                    'screenshot': screenshot_bytes
+                }
+
         except Exception as e:
-            self.log(f"Error capturando screenshot de {normalized_url}: {str(e)}", 'WARNING')
-            return None
+            self.log(f"Error cargando preview renderizado de {normalized_url}: {str(e)}", 'WARNING')
+            return {
+                'url': normalized_url,
+                'final_url': normalized_url,
+                'status': 'ERROR',
+                'title': 'Error al cargar preview',
+                'snippet': str(e),
+                'screenshot': None
+            }
+        finally:
+            try:
+                if context:
+                    await context.close()
+            except Exception:
+                pass
+            try:
+                if browser:
+                    await browser.close()
+            except Exception:
+                pass
     
     def log(self, message: str, level: str = 'INFO'):
         """
