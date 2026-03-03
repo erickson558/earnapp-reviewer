@@ -1,0 +1,35 @@
+# EarnApp Reviewer - Python Requirements
+# Generated: 2026-03-03
+
+# GUI Framework
+PyQt6==6.7.0
+PyQt6-Qt6==6.7.0
+PyQt6-sip==13.8.0
+
+# Web Automation
+playwright==1.45.0
+selenium==4.23.1
+
+# Async/Event Loop Integration
+qasync==0.27.0
+
+# HTTP Requests
+requests==2.32.3
+urllib3==2.2.2
+
+# Data Processing
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# Security
+certifi==2024.7.4
+cryptography==42.0.8
+
+# Utilities
+python-dateutil==2.9.0
+pytz==2024.1
+
+# Development (optional)
+# pytest==8.3.2
+# black==24.4.2
+# pylint==3.2.5

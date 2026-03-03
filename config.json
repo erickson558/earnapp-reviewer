@@ -1,0 +1,18 @@
+{
+    "version": "1.0.0",
+    "window": {
+        "width": 900,
+        "height": 700,
+        "x": 100,
+        "y": 100
+    },
+    "auto_start": false,
+    "auto_close_enabled": false,
+    "auto_close_seconds": 60,
+    "delay_ms": 3500,
+    "page_wait_ms": 8000,
+    "headless": false,
+    "keywords": "Device successfully linked\nSuccessful\nSuccessfully\nAlready",
+    "urls": "",
+    "last_log_check": ""
+}
