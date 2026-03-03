@@ -184,6 +184,59 @@ class ScannerBackend:
                 'title': 'Error al cargar preview',
                 'snippet': str(e)
             }
+
+    async def get_url_screenshot(self, url: str, width: int = 800, height: int = 600) -> Optional[bytes]:
+        """
+        Capture a screenshot of the URL using Playwright.
+        
+        Args:
+            url: URL to capture
+            width: Viewport width for screenshot
+            height: Viewport height for screenshot
+            
+        Returns:
+            Screenshot as bytes (PNG format) or None if failed
+        """
+        normalized_url = url.strip()
+        if not normalized_url:
+            return None
+
+        try:
+            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+            
+            async with async_playwright() as p:
+                # Try to launch browser
+                browser = None
+                try:
+                    browser = await p.chromium.launch(headless=True)
+                except Exception:
+                    # Fallback to system browser
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        channel='chrome' if sys.platform == 'win32' else None
+                    )
+                
+                context = await browser.new_context(
+                    viewport={'width': width, 'height': height},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                )
+                page = await context.new_page()
+                
+                # Navigate to URL with timeout
+                await page.goto(normalized_url, wait_until='domcontentloaded', timeout=15000)
+                
+                # Wait a bit for content to render
+                await asyncio.sleep(0.5)
+                
+                # Take screenshot
+                screenshot_bytes = await page.screenshot(type='png', full_page=False)
+                
+                await browser.close()
+                return screenshot_bytes
+                
+        except Exception as e:
+            self.log(f"Error capturando screenshot de {normalized_url}: {str(e)}", 'WARNING')
+            return None
     
     def log(self, message: str, level: str = 'INFO'):
         """

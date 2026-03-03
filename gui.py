@@ -16,10 +16,10 @@ import qasync
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QPushButton, QSpinBox, QCheckBox,
-    QGroupBox, QStatusBar, QMenuBar, QMessageBox
+    QGroupBox, QStatusBar, QMenuBar, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence
+from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QPixmap
 
 from backend import ScannerBackend
 
@@ -324,9 +324,19 @@ class MainWindow(QMainWindow):
 
         preview_layout.addLayout(preview_controls)
 
+        # Screenshot display
+        self.preview_image_label = QLabel()
+        self.preview_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f9f9f9;")
+        self.preview_image_label.setMinimumHeight(200)
+        self.preview_image_label.setMaximumHeight(400)
+        self.preview_image_label.setScaledContents(False)
+        self.preview_image_label.setText("La captura de pantalla aparecerá aquí")
+        preview_layout.addWidget(self.preview_image_label)
+
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
-        self.preview_text.setMaximumHeight(150)
+        self.preview_text.setMaximumHeight(100)
         self.preview_text.setPlaceholderText("Aquí verás una vista rápida del título y contenido de la página")
         preview_layout.addWidget(self.preview_text)
 
@@ -462,6 +472,7 @@ class MainWindow(QMainWindow):
     async def _load_preview_async(self, url: str):
         """Load URL preview without blocking the UI."""
         try:
+            # Load text preview
             preview = await asyncio.to_thread(self.backend.get_url_preview, url)
             preview_text = (
                 f"URL: {preview.get('url', '')}\n"
@@ -470,9 +481,30 @@ class MainWindow(QMainWindow):
                 f"{preview.get('snippet', '')}"
             )
             self.preview_text.setPlainText(preview_text)
+            
+            # Load screenshot
+            self.preview_image_label.setText("Capturando captura de pantalla...")
+            screenshot_bytes = await self.backend.get_url_screenshot(url, width=800, height=600)
+            
+            if screenshot_bytes:
+                pixmap = QPixmap()
+                pixmap.loadFromData(screenshot_bytes)
+                
+                # Scale to fit label while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaled(
+                    self.preview_image_label.width() - 10,
+                    self.preview_image_label.height() - 10,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.preview_image_label.setPixmap(scaled_pixmap)
+            else:
+                self.preview_image_label.setText("No se pudo capturar la captura de pantalla")
+            
             self.status_bar.showMessage("Preview actualizado")
         except Exception as e:
             self.preview_text.setPlainText(f"Error cargando preview: {str(e)}")
+            self.preview_image_label.setText("Error capturando imagen")
             self.status_bar.showMessage("Error en preview")
         finally:
             self._preview_loading = False

@@ -5,6 +5,22 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-03
+
+### ✨ Added
+- Vista en miniatura (captura de pantalla) de páginas en el panel de preview
+- Captura automática de screenshots usando Playwright con navegador headless
+- Visualización escalada de screenshots manteniendo proporciones
+
+### 🛠️ Improved
+- El preview ahora muestra tanto la información textual como una vista visual de la página
+- Experiencia de usuario mejorada al verificar URLs antes de iniciar escaneo
+
+### 🔧 Technical
+- Nuevo método async `get_url_screenshot()` en backend para capturar screenshots con Playwright
+- QLabel con QPixmap para renderizar imágenes en la interfaz
+- Manejo de errores robusto para capturas de pantalla fallidas
+
 ## [1.2.2] - 2026-03-03
 
 ### 🐛 Fixed
