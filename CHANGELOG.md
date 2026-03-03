@@ -5,6 +5,25 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-03
+
+### ✨ Added (Compilación a Ejecutable .exe)
+- 📦 Script de compilación con PyInstaller (`build.py`)
+- 💻 Distribución ejecutable: `EarnApp-Reviewer.exe` (42 MB binario independiente)
+- 🎨 Icono de aplicación integrado en el ejecutable
+- 📚 Documentación de compilación y automatización de procesos
+- 🔧 Soporte para distribuciones fuente y binaria
+
+### 📝 Changed
+- 📖 Documentación actualizada con instrucciones de compilación
+- 🔄 Proceso de configuración mejorado con opción de distribución binaria
+
+### 🔧 Technical Details
+- Compilado con PyInstaller 6.19.0
+- Ejecutable único con todas las dependencias integradas
+- No requiere intérprete externo para usuarios finales
+- Icono personalizado: business-color_money-coins_icon-icons.com_53446.ico
+
 ## [1.0.0] - 2026-03-03
 
 ### ✨ Added (Completamente Nuevo en Python)
