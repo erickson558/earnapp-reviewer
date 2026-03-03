@@ -5,6 +5,26 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-03-03
+
+### 🐛 Fixed
+- Ventanas de CMD ahora se ejecutan en modo silencioso (ocultas) en Windows durante la instalación de Playwright
+- Eliminada visualización de ventanas de consola al descargar Chromium
+
+### 🔧 Technical
+- Agregado `creationflags=subprocess.CREATE_NO_WINDOW` a llamadas subprocess en Windows para ocultar ventanas CMD
+
+## [1.2.1] - 2026-03-03
+
+### 🐛 Fixed
+- Corregido bucle de apertura de la app en `.exe` al intentar instalar Playwright Chromium
+- Eliminada la recursión de procesos en modo compilado (`frozen`) durante la instalación automática
+
+### 🛠️ Improved
+- La instalación local de Chromium ahora se intenta una sola vez por sesión para evitar reintentos infinitos
+- En modo `.exe`, se omite instalación automática de Playwright para evitar relanzamientos y se usa Chromium local o navegador del sistema
+- Mensajes de log más claros cuando la instalación ya fue intentada
+
 ## [1.2.0] - 2026-03-03
 
 ### ✨ Added

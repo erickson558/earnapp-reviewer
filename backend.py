@@ -53,6 +53,7 @@ class ScannerBackend:
         self.profile_dir = self.runtime_dir / 'browser_profile'
         self.playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
         self.state_file = self.runtime_dir / 'scanner_state.json'
+        self._playwright_install_attempted = False
         
         self._ensure_directories()
 
@@ -88,23 +89,52 @@ class ScannerBackend:
             self.log("Chromium local de Playwright detectado")
             return True
 
+        if self._playwright_install_attempted:
+            self.log("Ya se intentó instalar Chromium en esta sesión; se omite reintento", 'WARNING')
+            return False
+
+        self._playwright_install_attempted = True
         self.log("Chromium local no encontrado. Descargando con Playwright...", 'WARNING')
-        cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
 
         env = os.environ.copy()
         env['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
 
         try:
-            result = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                env=env
-            )
-            if result.stdout:
+            if getattr(sys, 'frozen', False):
+                self.log(
+                    "Modo .exe detectado: se omite instalación automática para evitar recursión. "
+                    "Se usará Chromium local si existe o navegador del sistema (Chrome/Edge).",
+                    'WARNING'
+                )
+                return False
+
+            cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
+            
+            # En Windows, usar CREATE_NO_WINDOW para ocultar ventanas de CMD
+            if sys.platform == 'win32':
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            else:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=env
+                )
+
+            if self._has_local_chromium():
                 self.log("Playwright install: Chromium descargado correctamente")
-            return self._has_local_chromium()
+                return True
+
+            self.log("La instalación de Chromium finalizó pero no se detectó en runtime local", 'WARNING')
+            return False
         except subprocess.CalledProcessError as e:
             self.log("No se pudo descargar Chromium local automáticamente", 'ERROR')
             if e.stderr:
