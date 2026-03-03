@@ -96,10 +96,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         # Paths
-        self.base_dir = Path(__file__).parent
+        self.base_dir = self._get_app_dir()
         self.config_path = self.base_dir / 'config.json'
         self.version_path = self.base_dir / 'VERSION'
-        self.icon_path = self.base_dir / 'icon.ico'
+        self.icon_path = self.base_dir / 'business-color_money-coins_icon-icons.com_53446.ico'
         
         # Load version
         self.version = self._load_version()
@@ -127,6 +127,12 @@ class MainWindow(QMainWindow):
         # Auto-start if enabled
         if self.config_manager.get('auto_start', False):
             QTimer.singleShot(500, self.start_scan)
+
+    def _get_app_dir(self) -> Path:
+        """Return executable folder in frozen mode, source folder in dev mode."""
+        if getattr(sys, 'frozen', False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parent
     
     def _load_version(self) -> str:
         """Load version from VERSION file."""

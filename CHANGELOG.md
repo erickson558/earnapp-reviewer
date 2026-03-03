@@ -5,6 +5,27 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-03-03
+
+### 🐛 Fixed
+- Corregido `ModuleNotFoundError: No module named 'qasync'` al ejecutar `EarnApp-Reviewer.exe`
+- Inclusión explícita de `qasync` y sus recursos en el bundle de PyInstaller
+
+### 🔧 Build
+- `build.py` actualizado con `--hidden-import=qasync` y `--collect-all=qasync`
+
+## [1.1.2] - 2026-03-03
+
+### 🐛 Fixed
+- Corrección de rutas en modo `.exe` (PyInstaller) para usar la carpeta del ejecutable y no la carpeta temporal
+- Corrección de carga de icono en la app para usar el `.ico` real del proyecto
+- Mejora del lanzamiento de navegador con fallback automático a Chrome/Edge del sistema cuando Chromium de Playwright no está disponible
+
+### 🔧 Build
+- `build.py` ahora genera `EarnApp-Reviewer.exe` directamente en la raíz del proyecto (misma carpeta que `main.py`)
+- Limpieza de artefactos de compilación mejorada (`build/`, `dist/`, `.spec` y `.exe` anterior)
+- Compilación PyInstaller más consistente con `--noconfirm` y `--distpath=.`
+
 ## [1.1.0] - 2026-03-03
 
 ### ✨ Added (Compilación a Ejecutable .exe)

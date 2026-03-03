@@ -52,8 +52,10 @@ def main():
     build_dir = Path('build')
     dist_dir = Path('dist')
     spec_file = Path('main.spec')
+    app_spec_file = Path('EarnApp-Reviewer.spec')
+    exe_file = Path('EarnApp-Reviewer.exe')
     
-    for path in [build_dir, dist_dir, spec_file]:
+    for path in [build_dir, dist_dir, spec_file, app_spec_file, exe_file]:
         if path.exists():
             try:
                 if path.is_dir():
@@ -69,16 +71,20 @@ def main():
     print("\n🔨 Building executable...")
     cmd = [
         "pyinstaller",
+        "--noconfirm",
         "--onefile",
         "--windowed",
         "--name=EarnApp-Reviewer",
+        "--distpath=.",
         "--specpath=build",
         "--workpath=build/work",
+        "--hidden-import=qasync",
+        "--collect-all=qasync",
     ]
     
     # Add icon if exists
     if icon_file.exists():
-        cmd.append(f"--icon={icon_file.name}")
+        cmd.append(f"--icon={icon_file.resolve()}")
     
     # Add main.py at the end
     cmd.append(main_py)

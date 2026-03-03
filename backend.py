@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -44,12 +45,18 @@ class ScannerBackend:
         }
         
         # Runtime directories
-        self.base_dir = Path(__file__).parent
+        self.base_dir = self._get_app_dir()
         self.runtime_dir = self.base_dir / 'runtime'
         self.profile_dir = self.runtime_dir / 'browser_profile'
         self.state_file = self.runtime_dir / 'scanner_state.json'
         
         self._ensure_directories()
+
+    def _get_app_dir(self) -> Path:
+        """Return writable application directory for source and frozen exe modes."""
+        if getattr(sys, 'frozen', False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parent
     
     def _ensure_directories(self):
         """Ensure runtime directories exist."""
@@ -252,12 +259,45 @@ class ScannerBackend:
         self.log(f"Iniciando escaneo: {len(remaining_urls)} URLs, {len(keywords)} keywords")
         
         try:
+            playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
+            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(playwright_browsers_dir)
+
             async with async_playwright() as p:
                 # Launch browser
-                self.browser = await p.chromium.launch(
-                    headless=headless,
-                    args=['--disable-blink-features=AutomationControlled']
-                )
+                launch_args = {
+                    'headless': headless,
+                    'args': ['--disable-blink-features=AutomationControlled']
+                }
+
+                try:
+                    self.browser = await p.chromium.launch(**launch_args)
+                except Exception as launch_error:
+                    self.log(
+                        "Chromium de Playwright no disponible; intentando navegador del sistema (Chrome/Edge)",
+                        'WARNING'
+                    )
+                    self.log(f"Detalle Chromium: {str(launch_error)}", 'WARNING')
+
+                    fallback_browser = None
+                    fallback_errors = []
+                    for channel in ('chrome', 'msedge'):
+                        try:
+                            fallback_browser = await p.chromium.launch(channel=channel, **launch_args)
+                            self.log(f"Navegador lanzado con canal del sistema: {channel}")
+                            break
+                        except Exception as channel_error:
+                            fallback_errors.append(f"{channel}: {str(channel_error)}")
+
+                    if fallback_browser is None:
+                        self.log(
+                            "No se pudo iniciar navegador. Instala Chromium de Playwright con: playwright install chromium",
+                            'ERROR'
+                        )
+                        if fallback_errors:
+                            self.log(" | ".join(fallback_errors), 'ERROR')
+                        raise launch_error
+
+                    self.browser = fallback_browser
                 
                 # Create context with profile
                 self.context = await self.browser.new_context(
