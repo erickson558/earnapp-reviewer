@@ -1,6 +1,17 @@
 # EarnApp Reviewer
 
-Aplicación automatizada para escanear URLs de EarnApp, detectar coincidencias por palabras clave y eliminar automáticamente URLs de la cola cuando hay detección de coincidencias.
+<div align="center">
+
+![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
+![PyQt6](https://img.shields.io/badge/PyQt6-6.7.0-green.svg)
+![License](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)
+![Status](https://img.shields.io/badge/Status-Active-success.svg)
+
+**Aplicación automatizada para escanear URLs de EarnApp, detectar coincidencias por palabras clave y eliminar automáticamente URLs de la cola.**
+
+</div>
+
+---
 
 ## 🚀 Características
 
