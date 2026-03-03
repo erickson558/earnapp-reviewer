@@ -1,0 +1,10 @@
+# Build and Distribution Requirements
+# Used for compiling to standalone .exe and creating distributions
+
+# PyInstaller - Standalone executable creator
+pyinstaller==6.19.0
+
+# Build and packaging tools
+build==1.0.3
+wheel==0.42.0
+setuptools==69.0.0
