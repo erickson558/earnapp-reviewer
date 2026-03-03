@@ -198,7 +198,6 @@ class ScannerBackend:
                 'screenshot': None
             }
 
-        browser = None
         context = None
 
         try:
@@ -208,11 +207,15 @@ class ScannerBackend:
             async with async_playwright() as p:
                 launch_args = {
                     'headless': True,
+                    'viewport': {'width': width, 'height': height},
                     'args': ['--disable-blink-features=AutomationControlled']
                 }
 
                 try:
-                    browser = await p.chromium.launch(**launch_args)
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=str(self.profile_dir),
+                        **launch_args
+                    )
                 except Exception as launch_error:
                     self.log(
                         "Preview: Chromium local no disponible, intentando navegador del sistema",
@@ -220,27 +223,30 @@ class ScannerBackend:
                     )
                     self.log(f"Preview detalle Chromium: {str(launch_error)}", 'WARNING')
 
-                    fallback_browser = None
+                    fallback_context = None
                     fallback_errors = []
                     for channel in ('chrome', 'msedge'):
                         try:
-                            fallback_browser = await p.chromium.launch(channel=channel, **launch_args)
+                            fallback_context = await p.chromium.launch_persistent_context(
+                                user_data_dir=str(self.profile_dir),
+                                channel=channel,
+                                **launch_args
+                            )
                             self.log(f"Preview usando canal del sistema: {channel}")
                             break
                         except Exception as channel_error:
                             fallback_errors.append(f"{channel}: {str(channel_error)}")
 
-                    if fallback_browser is None:
+                    if fallback_context is None:
                         if fallback_errors:
                             self.log(" | ".join(fallback_errors), 'ERROR')
                         raise launch_error
 
-                    browser = fallback_browser
+                    context = fallback_context
 
-                context = await browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    viewport={'width': width, 'height': height}
-                )
+                await context.set_extra_http_headers({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
                 page = await context.new_page()
                 await page.add_init_script(
                     "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
@@ -286,11 +292,6 @@ class ScannerBackend:
             try:
                 if context:
                     await context.close()
-            except Exception:
-                pass
-            try:
-                if browser:
-                    await browser.close()
             except Exception:
                 pass
     
