@@ -170,6 +170,7 @@ class MainWindow(QMainWindow):
         self.delay_spin = QSpinBox()
         self.delay_spin.setRange(1000, 300000)
         self.delay_spin.setSingleStep(500)
+        self.delay_spin.setMinimumWidth(150)
         self.delay_spin.setValue(self.config_manager.get('delay_ms', 3500))
         self.delay_spin.valueChanged.connect(lambda v: self.config_manager.set('delay_ms', v))
         delay_layout.addWidget(self.delay_spin)
@@ -178,6 +179,7 @@ class MainWindow(QMainWindow):
         self.page_wait_spin = QSpinBox()
         self.page_wait_spin.setRange(1000, 120000)
         self.page_wait_spin.setSingleStep(1000)
+        self.page_wait_spin.setMinimumWidth(150)
         self.page_wait_spin.setValue(self.config_manager.get('page_wait_ms', 8000))
         self.page_wait_spin.valueChanged.connect(lambda v: self.config_manager.set('page_wait_ms', v))
         delay_layout.addWidget(self.page_wait_spin)
@@ -300,9 +302,36 @@ class MainWindow(QMainWindow):
         self.urls_text.textChanged.connect(
             lambda: self.config_manager.set('urls', self.urls_text.toPlainText())
         )
+        self.urls_text.textChanged.connect(self.sync_preview_url_from_list)
         urls_layout.addWidget(self.urls_text)
         urls_group.setLayout(urls_layout)
         main_layout.addWidget(urls_group)
+
+        # URL preview
+        preview_group = QGroupBox("Preview de URL")
+        preview_layout = QVBoxLayout()
+
+        preview_controls = QHBoxLayout()
+        preview_controls.addWidget(QLabel("URL:"))
+
+        self.preview_url_input = QLineEdit()
+        self.preview_url_input.setPlaceholderText("Selecciona o pega una URL para previsualizar")
+        preview_controls.addWidget(self.preview_url_input)
+
+        self.preview_btn = QPushButton("Preview")
+        self.preview_btn.clicked.connect(self.preview_current_url)
+        preview_controls.addWidget(self.preview_btn)
+
+        preview_layout.addLayout(preview_controls)
+
+        self.preview_text = QTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setMaximumHeight(150)
+        self.preview_text.setPlaceholderText("Aquí verás una vista rápida del título y contenido de la página")
+        preview_layout.addWidget(self.preview_text)
+
+        preview_group.setLayout(preview_layout)
+        main_layout.addWidget(preview_group)
         
         # Keywords input
         keywords_group = QGroupBox("Palabras clave (una por línea o separadas por coma)")
@@ -328,6 +357,8 @@ class MainWindow(QMainWindow):
             window_config.get('width', 900),
             window_config.get('height', 700)
         )
+
+        self.sync_preview_url_from_list()
     
     def create_menu_bar(self):
         """Create menu bar."""
@@ -398,6 +429,54 @@ class MainWindow(QMainWindow):
         if len(current) > 50:
             current = current[:47] + '...'
         self.current_label.setText(f"Actual: {current}")
+
+    def sync_preview_url_from_list(self):
+        """Keep preview URL input aligned with first valid URL from list."""
+        if self.preview_url_input.text().strip():
+            return
+        urls = self.backend.normalize_urls(self.urls_text.toPlainText())
+        if urls:
+            self.preview_url_input.setText(urls[0])
+
+    def preview_current_url(self):
+        """Trigger async preview for selected URL."""
+        if getattr(self, '_preview_loading', False):
+            return
+
+        target_url = self.preview_url_input.text().strip()
+        if not target_url:
+            urls = self.backend.normalize_urls(self.urls_text.toPlainText())
+            if urls:
+                target_url = urls[0]
+                self.preview_url_input.setText(target_url)
+
+        if not target_url:
+            self.status_bar.showMessage("No hay URL para previsualizar")
+            return
+
+        self._preview_loading = True
+        self.preview_btn.setEnabled(False)
+        self.preview_text.setPlainText("Cargando preview...")
+        asyncio.ensure_future(self._load_preview_async(target_url))
+
+    async def _load_preview_async(self, url: str):
+        """Load URL preview without blocking the UI."""
+        try:
+            preview = await asyncio.to_thread(self.backend.get_url_preview, url)
+            preview_text = (
+                f"URL: {preview.get('url', '')}\n"
+                f"Estado: {preview.get('status', '')}\n"
+                f"Título: {preview.get('title', '')}\n\n"
+                f"{preview.get('snippet', '')}"
+            )
+            self.preview_text.setPlainText(preview_text)
+            self.status_bar.showMessage("Preview actualizado")
+        except Exception as e:
+            self.preview_text.setPlainText(f"Error cargando preview: {str(e)}")
+            self.status_bar.showMessage("Error en preview")
+        finally:
+            self._preview_loading = False
+            self.preview_btn.setEnabled(True)
     
     def start_scan(self):
         """Start scanning process."""

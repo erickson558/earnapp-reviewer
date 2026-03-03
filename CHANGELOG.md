@@ -5,6 +5,20 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-03
+
+### ✨ Added
+- Preview rápido de página en la GUI (URL + estado + título + extracto de contenido)
+- Carga de preview no bloqueante para mantener la interfaz fluida
+
+### 🛠️ Improved
+- Campos de milisegundos (`Espera entre URLs` y `Espera página`) más anchos para mejor legibilidad
+- Gestión local de Playwright mejorada: la app busca/descarga Chromium en `runtime/playwright-browsers` automáticamente si no existe
+
+### 🔧 Technical
+- Nuevo método backend para previsualización liviana de URLs con `requests` + `BeautifulSoup`
+- Detección explícita de Chromium local para evitar descargas innecesarias
+
 ## [1.1.4] - 2026-03-03
 
 ### 🐛 Fixed

@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import List, Dict, Callable, Optional
 from urllib.parse import urlparse
 
+import requests
+from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, Browser, Page, TimeoutError as PlaywrightTimeout
 
 
@@ -48,6 +51,7 @@ class ScannerBackend:
         self.base_dir = self._get_app_dir()
         self.runtime_dir = self.base_dir / 'runtime'
         self.profile_dir = self.runtime_dir / 'browser_profile'
+        self.playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
         self.state_file = self.runtime_dir / 'scanner_state.json'
         
         self._ensure_directories()
@@ -62,6 +66,94 @@ class ScannerBackend:
         """Ensure runtime directories exist."""
         self.runtime_dir.mkdir(exist_ok=True)
         self.profile_dir.mkdir(exist_ok=True)
+        self.playwright_browsers_dir.mkdir(exist_ok=True)
+
+    def _has_local_chromium(self) -> bool:
+        """Check if local Playwright Chromium is already present."""
+        try:
+            if not self.playwright_browsers_dir.exists():
+                return False
+            for child in self.playwright_browsers_dir.iterdir():
+                if child.is_dir() and child.name.startswith('chromium-'):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def ensure_playwright_browser(self) -> bool:
+        """Ensure Playwright Chromium exists in local runtime directory."""
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+
+        if self._has_local_chromium():
+            self.log("Chromium local de Playwright detectado")
+            return True
+
+        self.log("Chromium local no encontrado. Descargando con Playwright...", 'WARNING')
+        cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
+
+        env = os.environ.copy()
+        env['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+
+        try:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env
+            )
+            if result.stdout:
+                self.log("Playwright install: Chromium descargado correctamente")
+            return self._has_local_chromium()
+        except subprocess.CalledProcessError as e:
+            self.log("No se pudo descargar Chromium local automáticamente", 'ERROR')
+            if e.stderr:
+                self.log(e.stderr.strip()[-500:], 'ERROR')
+            return False
+        except Exception as e:
+            self.log(f"Error inesperado instalando Chromium local: {str(e)}", 'ERROR')
+            return False
+
+    def get_url_preview(self, url: str) -> Dict[str, str]:
+        """Fetch a lightweight URL preview (status, title and short text snippet)."""
+        normalized_url = url.strip()
+        if not normalized_url:
+            return {
+                'url': '',
+                'status': 'ERROR',
+                'title': 'Sin URL',
+                'snippet': 'No se proporcionó URL para previsualizar.'
+            }
+
+        try:
+            response = requests.get(
+                normalized_url,
+                timeout=15,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            )
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title = soup.title.string.strip() if soup.title and soup.title.string else 'Sin título'
+
+            text = soup.get_text(separator=' ', strip=True)
+            snippet = text[:800] + ('...' if len(text) > 800 else '')
+            if not snippet:
+                snippet = 'No se pudo extraer contenido legible de la página.'
+
+            return {
+                'url': normalized_url,
+                'status': f"OK ({response.status_code})",
+                'title': title,
+                'snippet': snippet
+            }
+        except Exception as e:
+            return {
+                'url': normalized_url,
+                'status': 'ERROR',
+                'title': 'Error al cargar preview',
+                'snippet': str(e)
+            }
     
     def log(self, message: str, level: str = 'INFO'):
         """
@@ -259,8 +351,8 @@ class ScannerBackend:
         self.log(f"Iniciando escaneo: {len(remaining_urls)} URLs, {len(keywords)} keywords")
         
         try:
-            playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
-            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(playwright_browsers_dir)
+            self.ensure_playwright_browser()
+            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
 
             async with async_playwright() as p:
                 # Launch browser
