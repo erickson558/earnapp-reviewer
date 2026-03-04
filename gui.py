@@ -128,6 +128,8 @@ class MainWindow(QMainWindow):
         self.preview_debounce_timer.setSingleShot(True)
         self.preview_debounce_timer.timeout.connect(self.preview_current_url)
         self._auth_in_progress = False
+        self._auth_after_stop_requested = False
+        self._auth_pending_url = ""
         
         # UI Setup
         self.init_ui()
@@ -543,9 +545,6 @@ class MainWindow(QMainWindow):
 
     def start_auth_session(self):
         """Open interactive browser session to login and persist auth state."""
-        if self.backend.is_running:
-            self.status_bar.showMessage("Detén el escaneo antes de iniciar sesión")
-            return
         if self._auth_in_progress:
             self.status_bar.showMessage("La sesión de autenticación ya está en curso")
             return
@@ -557,6 +556,13 @@ class MainWindow(QMainWindow):
                 target_url = urls[0]
         if not target_url:
             target_url = "https://earnapp.com/dashboard"
+
+        if self.backend.is_running:
+            self._auth_after_stop_requested = True
+            self._auth_pending_url = target_url
+            self.stop_scan()
+            self.status_bar.showMessage("Deteniendo escaneo para iniciar sesión automáticamente...")
+            return
 
         self._auth_in_progress = True
         self.auth_btn.setEnabled(False)
@@ -639,12 +645,23 @@ class MainWindow(QMainWindow):
         if not self.backend.is_running:
             self.check_completion_timer.stop()
             self.on_scan_finished()
+            if self._auth_after_stop_requested and not self._auth_in_progress:
+                pending_url = self._auth_pending_url.strip() or "https://earnapp.com/dashboard"
+                self._auth_after_stop_requested = False
+                self._auth_pending_url = ""
+                self._auth_in_progress = True
+                self.auth_btn.setEnabled(False)
+                self.status_bar.showMessage("Abriendo navegador para iniciar sesión...")
+                asyncio.ensure_future(self._run_auth_session_async(pending_url))
     
     def on_scan_finished(self):
         """Handle scan completion."""
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.status_bar.showMessage("Escaneo finalizado")
+        if self._auth_after_stop_requested:
+            self.status_bar.showMessage("Escaneo detenido. Iniciando sesión...")
+        else:
+            self.status_bar.showMessage("Escaneo finalizado")
     
     def stop_scan(self):
         """Stop scanning process."""

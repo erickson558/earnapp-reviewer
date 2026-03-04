@@ -5,6 +5,15 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-03-03
+
+### 🐛 Fixed
+- Corregido flujo para iniciar sesión mientras hay escaneo activo: ahora solicita stop y abre autenticación automáticamente al detenerse
+- Mejorada capacidad de detener escaneo durante esperas largas con delay interrumpible
+
+### 🛠️ Improved
+- Se acelera la detención cerrando contexto activo de Playwright cuando se solicita `Detener`
+
 ## [1.5.0] - 2026-03-03
 
 ### ✨ Added

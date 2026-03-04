@@ -579,7 +579,11 @@ class ScannerBackend:
                     
                     # Delay before next URL
                     if remaining_urls and not self.stop_requested:
-                        await asyncio.sleep(delay_ms / 1000.0)
+                        remaining_delay = delay_ms / 1000.0
+                        while remaining_delay > 0 and not self.stop_requested:
+                            sleep_chunk = min(0.2, remaining_delay)
+                            await asyncio.sleep(sleep_chunk)
+                            remaining_delay -= sleep_chunk
                 
                 await page.close()
                 await self.context.close()
@@ -608,3 +612,19 @@ class ScannerBackend:
         if self.is_running:
             self.stop_requested = True
             self.log("Solicitando detención del escaneo...")
+            if self.context is not None:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._close_active_context())
+                except RuntimeError:
+                    pass
+
+    async def _close_active_context(self):
+        """Close current Playwright context to accelerate stop request."""
+        try:
+            if self.context is not None:
+                await self.context.close()
+        except Exception:
+            pass
+        finally:
+            self.context = None
