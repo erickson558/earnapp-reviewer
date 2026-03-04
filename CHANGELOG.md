@@ -5,6 +5,16 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-03-03
+
+### 🐛 Fixed
+- Corregido flujo de UI al encolar autenticación durante escaneo
+- Ajustado estado del botón para evitar inconsistencias al pasar de cola a autenticación activa
+
+### 🛠️ Improved
+- Nuevo indicador visual `Iniciar sesión (en cola...)` mientras se detiene el escaneo
+- El botón vuelve automáticamente a `Iniciar sesión` cuando arranca la autenticación o finaliza el proceso
+
 ## [1.5.1] - 2026-03-03
 
 ### 🐛 Fixed

@@ -560,11 +560,14 @@ class MainWindow(QMainWindow):
         if self.backend.is_running:
             self._auth_after_stop_requested = True
             self._auth_pending_url = target_url
+            self.auth_btn.setText("Iniciar sesión (en cola...)")
+            self.auth_btn.setEnabled(False)
             self.stop_scan()
             self.status_bar.showMessage("Deteniendo escaneo para iniciar sesión automáticamente...")
             return
 
         self._auth_in_progress = True
+        self.auth_btn.setText("Iniciar sesión")
         self.auth_btn.setEnabled(False)
         self.status_bar.showMessage("Abriendo navegador para iniciar sesión...")
         asyncio.ensure_future(self._run_auth_session_async(target_url))
@@ -589,6 +592,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Error en autenticación: {str(e)}")
         finally:
             self._auth_in_progress = False
+            self.auth_btn.setText("Iniciar sesión")
             self.auth_btn.setEnabled(True)
     
     def start_scan(self):
@@ -650,6 +654,7 @@ class MainWindow(QMainWindow):
                 self._auth_after_stop_requested = False
                 self._auth_pending_url = ""
                 self._auth_in_progress = True
+                self.auth_btn.setText("Iniciar sesión")
                 self.auth_btn.setEnabled(False)
                 self.status_bar.showMessage("Abriendo navegador para iniciar sesión...")
                 asyncio.ensure_future(self._run_auth_session_async(pending_url))
