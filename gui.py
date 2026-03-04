@@ -127,6 +127,7 @@ class MainWindow(QMainWindow):
         self.preview_debounce_timer = QTimer()
         self.preview_debounce_timer.setSingleShot(True)
         self.preview_debounce_timer.timeout.connect(self.preview_current_url)
+        self._auth_in_progress = False
         
         # UI Setup
         self.init_ui()
@@ -207,6 +208,11 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_scan)
         self.stop_btn.setEnabled(False)
         buttons_layout.addWidget(self.stop_btn)
+
+        self.auth_btn = QPushButton("Iniciar &sesión")
+        self.auth_btn.setShortcut(QKeySequence("Ctrl+S"))
+        self.auth_btn.clicked.connect(self.start_auth_session)
+        buttons_layout.addWidget(self.auth_btn)
         
         self.exit_btn = QPushButton("&Salir")
         self.exit_btn.setShortcut(QKeySequence("Ctrl+Q"))
@@ -534,6 +540,50 @@ class MainWindow(QMainWindow):
             self._preview_loading = False
             if self._pending_preview_url and self._pending_preview_url != self._last_preview_url:
                 self.schedule_preview_refresh(120)
+
+    def start_auth_session(self):
+        """Open interactive browser session to login and persist auth state."""
+        if self.backend.is_running:
+            self.status_bar.showMessage("Detén el escaneo antes de iniciar sesión")
+            return
+        if self._auth_in_progress:
+            self.status_bar.showMessage("La sesión de autenticación ya está en curso")
+            return
+
+        target_url = self.preview_url_input.text().strip()
+        if not target_url:
+            urls = self.backend.normalize_urls(self.urls_text.toPlainText())
+            if urls:
+                target_url = urls[0]
+        if not target_url:
+            target_url = "https://earnapp.com/dashboard"
+
+        self._auth_in_progress = True
+        self.auth_btn.setEnabled(False)
+        self.status_bar.showMessage("Abriendo navegador para iniciar sesión...")
+        asyncio.ensure_future(self._run_auth_session_async(target_url))
+
+    async def _run_auth_session_async(self, target_url: str):
+        """Run interactive authentication and refresh preview after login."""
+        try:
+            QMessageBox.information(
+                self,
+                "Autenticación",
+                "Se abrirá una ventana de navegador para iniciar sesión.\n"
+                "Completa el login y cierra esa ventana para guardar la sesión."
+            )
+            ok = await self.backend.run_interactive_auth_session(target_url, timeout_seconds=240)
+            if ok:
+                self.status_bar.showMessage("Sesión actualizada. Refrescando preview...")
+                self._last_preview_url = ""
+                self.schedule_preview_refresh(100)
+            else:
+                self.status_bar.showMessage("No se pudo completar la autenticación")
+        except Exception as e:
+            self.status_bar.showMessage(f"Error en autenticación: {str(e)}")
+        finally:
+            self._auth_in_progress = False
+            self.auth_btn.setEnabled(True)
     
     def start_scan(self):
         """Start scanning process."""

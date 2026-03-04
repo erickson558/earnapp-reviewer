@@ -185,6 +185,48 @@ class ScannerBackend:
                 'snippet': str(e)
             }
 
+    async def _launch_persistent_context(self, p, headless: bool, width: int, height: int):
+        """Launch Playwright persistent context with local runtime profile and channel fallback."""
+        launch_args = {
+            'headless': headless,
+            'viewport': {'width': width, 'height': height},
+            'args': ['--disable-blink-features=AutomationControlled']
+        }
+
+        try:
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=str(self.profile_dir),
+                **launch_args
+            )
+            return context
+        except Exception as launch_error:
+            self.log(
+                "Chromium local no disponible; intentando navegador del sistema (Chrome/Edge)",
+                'WARNING'
+            )
+            self.log(f"Detalle Chromium: {str(launch_error)}", 'WARNING')
+
+            fallback_context = None
+            fallback_errors = []
+            for channel in ('chrome', 'msedge'):
+                try:
+                    fallback_context = await p.chromium.launch_persistent_context(
+                        user_data_dir=str(self.profile_dir),
+                        channel=channel,
+                        **launch_args
+                    )
+                    self.log(f"Contexto lanzado con canal del sistema: {channel}")
+                    break
+                except Exception as channel_error:
+                    fallback_errors.append(f"{channel}: {str(channel_error)}")
+
+            if fallback_context is None:
+                if fallback_errors:
+                    self.log(" | ".join(fallback_errors), 'ERROR')
+                raise launch_error
+
+            return fallback_context
+
     async def get_live_url_preview(self, url: str, width: int = 900, height: int = 620) -> Dict[str, Any]:
         """Load URL with Playwright and return text preview + screenshot bytes."""
         normalized_url = url.strip()
@@ -205,44 +247,7 @@ class ScannerBackend:
             os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
 
             async with async_playwright() as p:
-                launch_args = {
-                    'headless': True,
-                    'viewport': {'width': width, 'height': height},
-                    'args': ['--disable-blink-features=AutomationControlled']
-                }
-
-                try:
-                    context = await p.chromium.launch_persistent_context(
-                        user_data_dir=str(self.profile_dir),
-                        **launch_args
-                    )
-                except Exception as launch_error:
-                    self.log(
-                        "Preview: Chromium local no disponible, intentando navegador del sistema",
-                        'WARNING'
-                    )
-                    self.log(f"Preview detalle Chromium: {str(launch_error)}", 'WARNING')
-
-                    fallback_context = None
-                    fallback_errors = []
-                    for channel in ('chrome', 'msedge'):
-                        try:
-                            fallback_context = await p.chromium.launch_persistent_context(
-                                user_data_dir=str(self.profile_dir),
-                                channel=channel,
-                                **launch_args
-                            )
-                            self.log(f"Preview usando canal del sistema: {channel}")
-                            break
-                        except Exception as channel_error:
-                            fallback_errors.append(f"{channel}: {str(channel_error)}")
-
-                    if fallback_context is None:
-                        if fallback_errors:
-                            self.log(" | ".join(fallback_errors), 'ERROR')
-                        raise launch_error
-
-                    context = fallback_context
+                context = await self._launch_persistent_context(p, headless=True, width=width, height=height)
 
                 await context.set_extra_http_headers({
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -288,6 +293,46 @@ class ScannerBackend:
                 'snippet': str(e),
                 'screenshot': None
             }
+        finally:
+            try:
+                if context:
+                    await context.close()
+            except Exception:
+                pass
+
+    async def run_interactive_auth_session(self, start_url: str, timeout_seconds: int = 180) -> bool:
+        """Open a visible browser with persistent profile for manual login/authentication."""
+        target_url = start_url.strip() if start_url else "https://earnapp.com/dashboard"
+        context = None
+
+        try:
+            self.ensure_playwright_browser()
+            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+
+            async with async_playwright() as p:
+                context = await self._launch_persistent_context(p, headless=False, width=1280, height=800)
+                await context.set_extra_http_headers({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+
+                self.log(
+                    f"Sesión de autenticación abierta. Completa el login y cierra el navegador (timeout {timeout_seconds}s).",
+                    'INFO'
+                )
+
+                try:
+                    await context.wait_for_event('close', timeout=timeout_seconds * 1000)
+                except PlaywrightTimeout:
+                    self.log("Tiempo de autenticación agotado; cerrando sesión interactiva", 'WARNING')
+
+                return True
+
+        except Exception as e:
+            self.log(f"Error en sesión interactiva de autenticación: {str(e)}", 'ERROR')
+            return False
         finally:
             try:
                 if context:
@@ -495,47 +540,15 @@ class ScannerBackend:
             os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
 
             async with async_playwright() as p:
-                # Launch browser
-                launch_args = {
-                    'headless': headless,
-                    'args': ['--disable-blink-features=AutomationControlled']
-                }
-
-                try:
-                    self.browser = await p.chromium.launch(**launch_args)
-                except Exception as launch_error:
-                    self.log(
-                        "Chromium de Playwright no disponible; intentando navegador del sistema (Chrome/Edge)",
-                        'WARNING'
-                    )
-                    self.log(f"Detalle Chromium: {str(launch_error)}", 'WARNING')
-
-                    fallback_browser = None
-                    fallback_errors = []
-                    for channel in ('chrome', 'msedge'):
-                        try:
-                            fallback_browser = await p.chromium.launch(channel=channel, **launch_args)
-                            self.log(f"Navegador lanzado con canal del sistema: {channel}")
-                            break
-                        except Exception as channel_error:
-                            fallback_errors.append(f"{channel}: {str(channel_error)}")
-
-                    if fallback_browser is None:
-                        self.log(
-                            "No se pudo iniciar navegador. Instala Chromium de Playwright con: playwright install chromium",
-                            'ERROR'
-                        )
-                        if fallback_errors:
-                            self.log(" | ".join(fallback_errors), 'ERROR')
-                        raise launch_error
-
-                    self.browser = fallback_browser
-                
-                # Create context with profile
-                self.context = await self.browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    viewport={'width': 1280, 'height': 720}
+                self.context = await self._launch_persistent_context(
+                    p,
+                    headless=headless,
+                    width=1280,
+                    height=720
                 )
+                await self.context.set_extra_http_headers({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
                 
                 page = await self.context.new_page()
                 
@@ -570,7 +583,8 @@ class ScannerBackend:
                 
                 await page.close()
                 await self.context.close()
-                await self.browser.close()
+                self.context = None
+                self.browser = None
                 
         except Exception as e:
             self.log(f"Error durante el escaneo: {str(e)}", 'ERROR')

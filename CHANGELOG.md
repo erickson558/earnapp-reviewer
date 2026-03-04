@@ -5,6 +5,20 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-03-03
+
+### ✨ Added
+- Nuevo botón `Iniciar sesión` para autenticación manual desde la app con navegador visible
+- Flujo guiado para completar login y persistir sesión en `runtime/browser_profile`
+
+### 🛠️ Improved
+- Escaneo y preview ahora reutilizan contexto persistente para aprovechar cookies/sesión guardada
+- Menor dependencia de autenticación externa al navegador por defecto del sistema
+
+### 🔧 Technical
+- Nuevo helper backend `_launch_persistent_context()` para centralizar launch/fallback de contexto persistente
+- Nuevo método backend `run_interactive_auth_session()` para login asistido con timeout controlado
+
 ## [1.4.1] - 2026-03-03
 
 ### 🐛 Fixed
