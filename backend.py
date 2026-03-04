@@ -415,7 +415,7 @@ class ScannerBackend:
         
         return keywords
     
-    def save_state(self, urls: List[str], keywords: List[str]):
+    def save_state(self, urls: List[str], keywords: List[str], current_index: int = 0):
         """
         Save current scanner state to file.
         
@@ -423,9 +423,14 @@ class ScannerBackend:
             urls: List of remaining URLs
             keywords: List of keywords
         """
+        normalized_index = 0
+        if urls:
+            normalized_index = max(0, min(current_index, len(urls) - 1))
+
         state = {
             'urls': urls,
             'keywords': keywords,
+            'current_index': normalized_index,
             'stats': self.stats,
             'saved_at': datetime.now().isoformat()
         }
@@ -525,6 +530,7 @@ class ScannerBackend:
         self.is_running = True
         self.stop_requested = False
         remaining_urls = urls.copy()
+        current_index = 0
         
         self.stats = {
             'pending': len(remaining_urls),
@@ -533,7 +539,9 @@ class ScannerBackend:
             'current_url': '-'
         }
         
-        self.log(f"Iniciando escaneo: {len(remaining_urls)} URLs, {len(keywords)} keywords")
+        self.log(
+            f"Iniciando escaneo circular infinito: {len(remaining_urls)} URLs, {len(keywords)} keywords"
+        )
         
         try:
             self.ensure_playwright_browser()
@@ -552,9 +560,12 @@ class ScannerBackend:
                 
                 page = await self.context.new_page()
                 
-                # Process URLs
+                # Process URLs in a circular queue until user stops or queue is empty
                 while remaining_urls and not self.stop_requested:
-                    url = remaining_urls[0]
+                    if current_index >= len(remaining_urls):
+                        current_index = 0
+
+                    url = remaining_urls[current_index]
                     self.stats['current_url'] = url
                     self.stats['pending'] = len(remaining_urls)
                     
@@ -565,17 +576,20 @@ class ScannerBackend:
                     found = await self.scan_url(page, url, keywords, page_wait_ms)
                     
                     if found:
-                        remaining_urls.pop(0)
+                        remaining_urls.pop(current_index)
                         self.stats['removed'] += 1
                         self.log(f"URL eliminada de la cola: {url}")
+
+                        if current_index >= len(remaining_urls):
+                            current_index = 0
                     else:
-                        remaining_urls.pop(0)
+                        current_index = (current_index + 1) % len(remaining_urls)
                     
                     self.stats['processed'] += 1
                     
                     # Save state periodically
                     if self.stats['processed'] % 5 == 0:
-                        self.save_state(remaining_urls, keywords)
+                        self.save_state(remaining_urls, keywords, current_index)
                     
                     # Delay before next URL
                     if remaining_urls and not self.stop_requested:
@@ -597,7 +611,7 @@ class ScannerBackend:
             self.stats['current_url'] = '-'
             
             # Final state save
-            self.save_state(remaining_urls, keywords)
+            self.save_state(remaining_urls, keywords, current_index)
             
             if self.stop_requested:
                 self.log("Escaneo detenido por el usuario")

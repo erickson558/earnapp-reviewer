@@ -27,14 +27,15 @@ from backend import ScannerBackend
 class ConfigManager:
     """Manages application configuration."""
     
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path, app_version: str):
         self.config_path = config_path
+        self.app_version = app_version
         self.config = self._load_config()
     
     def _load_config(self) -> dict:
         """Load configuration from file."""
         default_config = {
-            "version": "1.0.0",
+            "version": self.app_version,
             "window": {"width": 900, "height": 700, "x": 100, "y": 100},
             "auto_start": False,
             "auto_close_enabled": False,
@@ -105,7 +106,9 @@ class MainWindow(QMainWindow):
         self.version = self._load_version()
         
         # Configuration manager
-        self.config_manager = ConfigManager(self.config_path)
+        self.config_manager = ConfigManager(self.config_path, self.version)
+        if self.config_manager.get('version') != self.version:
+            self.config_manager.set('version', self.version)
         
         # Backend
         self.backend = ScannerBackend(log_callback=self.on_log_message)

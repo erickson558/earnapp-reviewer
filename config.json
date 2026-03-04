@@ -1,9 +1,9 @@
 {
-    "version": "1.5.2",
+    "version": "1.5.3",
     "window": {
-        "x": 2775,
-        "y": 19,
-        "width": 710,
+        "x": 2846,
+        "y": 37,
+        "width": 790,
         "height": 937
     },
     "auto_start": true,

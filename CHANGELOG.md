@@ -5,6 +5,19 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-03-03
+
+### ✨ Added
+- Escaneo circular infinito de URLs: la cola rota continuamente hasta que el usuario la detenga
+
+### 🛠️ Improved
+- Ajuste dinámico de la cola al eliminar URLs encontradas, evitando saltos de índice
+- Persistencia de estado ahora incluye `current_index` para mantener el punto actual de la cola
+- Build detecta automáticamente el `.ico` disponible en la carpeta del proyecto
+
+### 🔧 Technical
+- Versionado de configuración sincronizado con el archivo `VERSION` al iniciar la app
+
 ## [1.5.2] - 2026-03-03
 
 ### 🐛 Fixed

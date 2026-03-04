@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+
+python scripts/bump_version.py --part patch --quiet
+
+git add VERSION config.json

@@ -16,7 +16,7 @@
 ## 🚀 Características
 
 ### Funcionalidades Principales
-- ✅ **Escaneo automatizado** con navegador real usando Playwright
+- ✅ **Escaneo automatizado circular e infinito** con navegador real usando Playwright
 - ✅ **Interfaz gráfica moderna** con PyQt6
 - ✅ **Detección inteligente** de palabras clave (tolerante a variaciones)
 - ✅ **Persistencia de estado** - guarda y restaura progreso
@@ -101,7 +101,7 @@ earnapp-reviewer
 Edita `config.json`:
 ```json
 {
-    "version": "1.0.0",
+    "version": "1.5.3",
     "auto_start": false,
     "auto_close_enabled": false,
     "auto_close_seconds": 60,
@@ -149,14 +149,24 @@ Este proyecto usa **Semantic Versioning** (SemVer): `MAJOR.MINOR.PATCH`
 - **MINOR** (1.x.0) - Funcionalidades nuevas compatibles
 - **MAJOR** (x.0.0) - Cambios incompatibles
 
+### Versionado automático por commit
+
+Para forzar nueva versión en cada commit:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Con esto, cada `git commit` ejecuta `scripts/bump_version.py` y sube automáticamente el `PATCH` en `VERSION` y `config.json`.
+Recomendación: actualiza también `CHANGELOG.md` en el mismo commit para mantener trazabilidad completa en GitHub.
+
 ### Historial de Versiones
 
-#### v1.0.0 (2026-03-03)
-- 🎉 Versión inicial en Python
-- Migración desde PHP/JavaScript
-- Interfaz GUI con PyQt6
-- Todas las características del original
-- Mejoras de seguridad y arquitectura
+#### v1.5.3 (2026-03-03)
+- 🔁 Escaneo de cola circular e infinito hasta detener manualmente
+- 🧠 Ajuste dinámico de índices al eliminar URLs encontradas
+- 🏷️ Versionado sincronizado entre `VERSION`, app y metadata
+- 🧰 Build robusto con detección automática de icono local `.ico`
 
 ## 🛠️ Desarrollo
 
@@ -194,9 +204,9 @@ Usa **PyInstaller** para crear ejecutable:
 pip install pyinstaller
 
 # Compilar
-pyinstaller --onefile --windowed --icon=icon.ico main.py
+python build.py
 
-# El ejecutable estará en dist/main.exe
+# El ejecutable estará en la raíz del proyecto: EarnApp-Reviewer.exe
 ```
 
 ## 📝 Logs
@@ -263,4 +273,4 @@ Para reportar bugs, solicitar características o preguntas:
 ---
 
 **Última actualización:** 2026-03-03  
-**Versión:** 1.0.0
+**Versión:** 1.5.3

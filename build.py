@@ -15,6 +15,18 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
+
+
+def _detect_icon_file(project_dir: Path) -> Optional[Path]:
+    """Detect best icon candidate from project root."""
+    preferred_name = "business-color_money-coins_icon-icons.com_53446.ico"
+    preferred_icon = project_dir / preferred_name
+    if preferred_icon.exists():
+        return preferred_icon
+
+    icons = sorted(project_dir.glob("*.ico"))
+    return icons[0] if icons else None
 
 
 def _validate_build_environment() -> bool:
@@ -49,7 +61,7 @@ def main():
     os.chdir(project_dir)
     
     main_py = 'main.py'
-    icon_file = project_dir / 'business-color_money-coins_icon-icons.com_53446.ico'
+    icon_file = _detect_icon_file(project_dir)
     
     print("=" * 60)
     print("EarnApp Reviewer - Build Script")
@@ -67,13 +79,11 @@ def main():
     print(f"✓ Found: {main_py}")
     
     # Check if icon exists
-    if icon_file.exists():
-        print(f"✓ Found: {icon_file.name}")
-        icon_arg = f"--icon={icon_file.name}"
+    if icon_file:
+        print(f"✓ Found icon: {icon_file.name}")
     else:
-        print(f"⚠️  Warning: Icon file not found at {icon_file}")
+        print("⚠️  Warning: No .ico file found in project root")
         print("   Building without custom icon...")
-        icon_arg = ""
     
     # Clean old builds
     print("\n📦 Cleaning old builds...")
@@ -111,7 +121,7 @@ def main():
     ]
     
     # Add icon if exists
-    if icon_file.exists():
+    if icon_file:
         cmd.append(f"--icon={icon_file.resolve()}")
     
     # Add main.py at the end
