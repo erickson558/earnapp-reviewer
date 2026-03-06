@@ -5,6 +5,18 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-03-05
+
+### 🐛 Fixed
+- El panel de preview ahora sigue la URL actual del carrusel durante el escaneo (URL activa en `Actual:`)
+
+### 🛠️ Improved
+- Si la URL activa llega por logs (por ejemplo `Navegando a:`), el preview también se sincroniza automáticamente
+- El preview vuelve a renderizarse al cambiar de URL en runtime, evitando quedarse en la URL anterior
+
+### 📚 Documentation
+- Se fortaleció la guía de versionado para mantener coincidencia de versión entre app, `VERSION`, `config.json` y repositorio GitHub
+
 ## [1.5.3] - 2026-03-03
 
 ### ✨ Added

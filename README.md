@@ -101,7 +101,7 @@ earnapp-reviewer
 Edita `config.json`:
 ```json
 {
-    "version": "1.5.3",
+    "version": "1.5.4",
     "auto_start": false,
     "auto_close_enabled": false,
     "auto_close_seconds": 60,
@@ -162,11 +162,35 @@ Recomendación: actualiza también `CHANGELOG.md` en el mismo commit para manten
 
 ### Historial de Versiones
 
+#### v1.5.4 (2026-03-05)
+- 🔁 El preview de URL sigue automáticamente la URL activa del carrusel durante el escaneo
+- 📌 Sincronización adicional por logs: si la URL activa se detecta en barra/log, el preview se actualiza
+- 🧭 Consistencia de versionado reforzada entre `VERSION`, `config.json`, app y repositorio
+
 #### v1.5.3 (2026-03-03)
 - 🔁 Escaneo de cola circular e infinito hasta detener manualmente
 - 🧠 Ajuste dinámico de índices al eliminar URLs encontradas
 - 🏷️ Versionado sincronizado entre `VERSION`, app y metadata
 - 🧰 Build robusto con detección automática de icono local `.ico`
+
+### Política Recomendada De Versionado
+
+Para mantener consistencia de versiones en todos lados:
+
+- `VERSION` es la fuente de verdad de la versión de la app
+- `config.json` se sincroniza automáticamente en cada commit
+- La GUI muestra la versión cargada desde `VERSION`
+- GitHub debe reflejar la misma versión en changelog/releases/tags
+
+Flujo recomendado por commit:
+
+```bash
+git add .
+git commit -m "tipo: descripción del cambio"
+git push origin main
+```
+
+Con `.githooks/pre-commit` activo, cada commit incrementa `PATCH` automáticamente y agrega `VERSION` + `config.json` al commit.
 
 ## 🛠️ Desarrollo
 
@@ -272,5 +296,5 @@ Para reportar bugs, solicitar características o preguntas:
 
 ---
 
-**Última actualización:** 2026-03-03  
-**Versión:** 1.5.3
+**Última actualización:** 2026-03-05  
+**Versión:** 1.5.4

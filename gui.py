@@ -8,6 +8,7 @@ License: Apache License 2.0
 
 import asyncio
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -127,6 +128,7 @@ class MainWindow(QMainWindow):
         self._preview_loading = False
         self._pending_preview_url: Optional[str] = None
         self._last_preview_url = ""
+        self._last_runtime_preview_url = ""
         self.preview_debounce_timer = QTimer()
         self.preview_debounce_timer.setSingleShot(True)
         self.preview_debounce_timer.timeout.connect(self.preview_current_url)
@@ -450,6 +452,36 @@ class MainWindow(QMainWindow):
     def append_log(self, message: str):
         """Append message to status bar."""
         self.status_bar.showMessage(message[-200:])  # Last 200 chars
+
+        # Keep preview synchronized with the URL currently being processed.
+        log_url = self._extract_url_from_log(message)
+        if log_url and self.backend.is_running:
+            self._follow_runtime_url(log_url)
+
+    def _extract_url_from_log(self, message: str) -> Optional[str]:
+        """Extract first HTTP(S) URL found in a log line."""
+        match = re.search(r"https?://\S+", message)
+        if not match:
+            return None
+        return match.group(0).strip().rstrip(',.')
+
+    def _follow_runtime_url(self, url: str):
+        """Force preview input to follow the active scan URL."""
+        normalized = url.strip()
+        if not normalized:
+            return
+        if normalized == self._last_runtime_preview_url:
+            return
+
+        self._last_runtime_preview_url = normalized
+        if self.preview_url_input.text().strip() != normalized:
+            self.preview_url_input.blockSignals(True)
+            self.preview_url_input.setText(normalized)
+            self.preview_url_input.blockSignals(False)
+
+        # Reset last preview cache so each new runtime URL renders immediately.
+        self._last_preview_url = ""
+        self.schedule_preview_refresh(150)
     
     def update_progress(self, stats: dict):
         """Update progress display."""
@@ -462,10 +494,19 @@ class MainWindow(QMainWindow):
             current = current[:47] + '...'
         self.current_label.setText(f"Actual: {current}")
 
+        current_url = stats.get('current_url', '').strip()
+        if current_url and current_url != '-':
+            self._follow_runtime_url(current_url)
+
     def sync_preview_url_from_list(self):
-        """Keep preview URL input aligned with first valid URL from list."""
+        """Keep preview URL aligned: runtime URL first, then first URL from list."""
+        if self.backend.is_running and self._last_runtime_preview_url:
+            self._follow_runtime_url(self._last_runtime_preview_url)
+            return
+
         if self.preview_url_input.text().strip():
             return
+
         urls = self.backend.normalize_urls(self.urls_text.toPlainText())
         if urls:
             self.preview_url_input.setText(urls[0])
@@ -666,6 +707,7 @@ class MainWindow(QMainWindow):
         """Handle scan completion."""
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._last_runtime_preview_url = ""
         if self._auth_after_stop_requested:
             self.status_bar.showMessage("Escaneo detenido. Iniciando sesión...")
         else:

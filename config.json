@@ -1,10 +1,10 @@
 {
-    "version": "1.5.3",
+    "version": "1.5.4",
     "window": {
-        "x": 2846,
-        "y": 37,
-        "width": 790,
-        "height": 937
+        "x": 2871,
+        "y": 33,
+        "width": 927,
+        "height": 945
     },
     "auto_start": true,
     "auto_close_enabled": false,
