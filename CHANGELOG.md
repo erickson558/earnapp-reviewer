@@ -5,6 +5,20 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-03-12
+
+### 🐛 Fixed
+- Corrección de persistencia de cola: las URLs eliminadas durante el escaneo ahora se sincronizan en tiempo real con la UI y `config.json`
+- Ajuste en autenticación interactiva para guardar sesión al finalizar, incluso tras periodos largos sin uso
+
+### ✨ Added
+- Respaldo explícito de sesión Playwright en `runtime/auth_state.json` para restaurar cookies/estado de autenticación
+- Canal de actualización `remaining_urls_callback` entre backend y GUI para mantener consistencia de cola restante
+
+### 🛠️ Improved
+- Flujo de inicio de escaneo: normaliza y persiste URLs válidas al arrancar sin borrar entrada inválida cuando no hay URLs procesables
+- Política de versionado reforzada con incremento patch a `1.5.5` y sincronización entre app/config/repositorio
+
 ## [1.5.4] - 2026-03-05
 
 ### 🐛 Fixed

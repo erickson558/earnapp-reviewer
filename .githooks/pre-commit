@@ -1,6 +1,26 @@
 #!/usr/bin/env sh
 set -e
 
-python scripts/bump_version.py --part patch --quiet
+# Auto-bump patch version on each commit.
+# Skip once with:
+#   SKIP_AUTO_BUMP_VERSION=1 git commit -m "..."
+if [ "$SKIP_AUTO_BUMP_VERSION" = "1" ]; then
+	echo "[pre-commit] Auto bump de version omitido (SKIP_AUTO_BUMP_VERSION=1)."
+	exit 0
+fi
 
+if [ -x ".venv/Scripts/python.exe" ]; then
+	PYTHON_CMD=".venv/Scripts/python.exe"
+elif command -v python >/dev/null 2>&1; then
+	PYTHON_CMD="python"
+elif command -v py >/dev/null 2>&1; then
+	PYTHON_CMD="py -3"
+else
+	echo "[pre-commit] No se encontro Python para ejecutar scripts/bump_version.py"
+	exit 1
+fi
+
+# shellcheck disable=SC2086
+$PYTHON_CMD scripts/bump_version.py --part patch --quiet
 git add VERSION config.json
+echo "[pre-commit] Version incrementada automaticamente (patch)."

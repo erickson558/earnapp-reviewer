@@ -53,6 +53,7 @@ class ScannerBackend:
         self.profile_dir = self.runtime_dir / 'browser_profile'
         self.playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
         self.state_file = self.runtime_dir / 'scanner_state.json'
+        self.auth_state_file = self.runtime_dir / 'auth_state.json'
         self._playwright_install_attempted = False
         
         self._ensure_directories()
@@ -68,6 +69,30 @@ class ScannerBackend:
         self.runtime_dir.mkdir(exist_ok=True)
         self.profile_dir.mkdir(exist_ok=True)
         self.playwright_browsers_dir.mkdir(exist_ok=True)
+
+    async def _restore_auth_state(self, context):
+        """Restore cookie state when available as a backup to persistent profile."""
+        if not self.auth_state_file.exists():
+            return
+
+        try:
+            with open(self.auth_state_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+
+            cookies = state_data.get('cookies', [])
+            if cookies:
+                await context.add_cookies(cookies)
+                self.log(f"Estado de autenticación restaurado ({len(cookies)} cookies)")
+        except Exception as e:
+            self.log(f"No se pudo restaurar auth_state.json: {str(e)}", 'WARNING')
+
+    async def _persist_auth_state(self, context):
+        """Persist cookie/localStorage state to survive long inactivity periods."""
+        try:
+            await context.storage_state(path=str(self.auth_state_file))
+            self.log("Estado de autenticación guardado en runtime/auth_state.json")
+        except Exception as e:
+            self.log(f"No se pudo guardar auth_state.json: {str(e)}", 'WARNING')
 
     def _has_local_chromium(self) -> bool:
         """Check if local Playwright Chromium is already present."""
@@ -248,6 +273,7 @@ class ScannerBackend:
 
             async with async_playwright() as p:
                 context = await self._launch_persistent_context(p, headless=True, width=width, height=height)
+                await self._restore_auth_state(context)
 
                 await context.set_extra_http_headers({
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -296,6 +322,7 @@ class ScannerBackend:
         finally:
             try:
                 if context:
+                    await self._persist_auth_state(context)
                     await context.close()
             except Exception:
                 pass
@@ -311,6 +338,7 @@ class ScannerBackend:
 
             async with async_playwright() as p:
                 context = await self._launch_persistent_context(p, headless=False, width=1280, height=800)
+                await self._restore_auth_state(context)
                 await context.set_extra_http_headers({
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
@@ -323,10 +351,17 @@ class ScannerBackend:
                     'INFO'
                 )
 
-                try:
-                    await context.wait_for_event('close', timeout=timeout_seconds * 1000)
-                except PlaywrightTimeout:
+                started_at = time.monotonic()
+                while time.monotonic() - started_at < timeout_seconds:
+                    # Si el usuario cierra todas las ventanas, la sesión se considera completada.
+                    if len(context.pages) == 0:
+                        break
+                    await asyncio.sleep(1)
+
+                if len(context.pages) > 0:
                     self.log("Tiempo de autenticación agotado; cerrando sesión interactiva", 'WARNING')
+
+                await self._persist_auth_state(context)
 
                 return True
 
@@ -515,7 +550,8 @@ class ScannerBackend:
     
     async def run_scan(self, urls: List[str], keywords: List[str],
                       delay_ms: int, page_wait_ms: int, headless: bool,
-                      progress_callback: Optional[Callable] = None):
+                      progress_callback: Optional[Callable] = None,
+                      remaining_urls_callback: Optional[Callable[[List[str]], None]] = None):
         """
         Run the scanning process.
         
@@ -542,6 +578,9 @@ class ScannerBackend:
         self.log(
             f"Iniciando escaneo circular infinito: {len(remaining_urls)} URLs, {len(keywords)} keywords"
         )
+
+        if remaining_urls_callback:
+            remaining_urls_callback(remaining_urls.copy())
         
         try:
             self.ensure_playwright_browser()
@@ -554,6 +593,7 @@ class ScannerBackend:
                     width=1280,
                     height=720
                 )
+                await self._restore_auth_state(self.context)
                 await self.context.set_extra_http_headers({
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
@@ -580,6 +620,9 @@ class ScannerBackend:
                         self.stats['removed'] += 1
                         self.log(f"URL eliminada de la cola: {url}")
 
+                        if remaining_urls_callback:
+                            remaining_urls_callback(remaining_urls.copy())
+
                         if current_index >= len(remaining_urls):
                             current_index = 0
                     else:
@@ -600,6 +643,7 @@ class ScannerBackend:
                             remaining_delay -= sleep_chunk
                 
                 await page.close()
+                await self._persist_auth_state(self.context)
                 await self.context.close()
                 self.context = None
                 self.browser = None
@@ -612,6 +656,8 @@ class ScannerBackend:
             
             # Final state save
             self.save_state(remaining_urls, keywords, current_index)
+            if remaining_urls_callback:
+                remaining_urls_callback(remaining_urls.copy())
             
             if self.stop_requested:
                 self.log("Escaneo detenido por el usuario")

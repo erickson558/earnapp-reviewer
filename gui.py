@@ -12,7 +12,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import qasync
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -89,6 +89,7 @@ class WorkerSignals(QObject):
     error = pyqtSignal(str)
     progress = pyqtSignal(dict)
     log = pyqtSignal(str)
+    remaining_urls = pyqtSignal(list)
 
 
 class MainWindow(QMainWindow):
@@ -118,6 +119,7 @@ class MainWindow(QMainWindow):
         self.signals = WorkerSignals()
         self.signals.progress.connect(self.update_progress)
         self.signals.log.connect(self.append_log)
+        self.signals.remaining_urls.connect(self.on_remaining_urls_updated)
         
         # Auto-close timer
         self.auto_close_timer = QTimer()
@@ -448,6 +450,22 @@ class MainWindow(QMainWindow):
     def on_log_message(self, message: str):
         """Handle log message from backend."""
         self.signals.log.emit(message)
+
+    def on_remaining_urls_updated(self, remaining_urls: List[str]):
+        """Keep URLs textbox and config synchronized with queue after removals."""
+        normalized_text = '\n'.join(remaining_urls)
+        current_text = self.urls_text.toPlainText().strip()
+
+        if current_text == normalized_text.strip():
+            return
+
+        self.urls_text.blockSignals(True)
+        self.urls_text.setPlainText(normalized_text)
+        self.urls_text.blockSignals(False)
+
+        self.config_manager.set('urls', normalized_text)
+        self.sync_preview_url_from_list()
+        self.schedule_preview_refresh(180)
     
     def append_log(self, message: str):
         """Append message to status bar."""
@@ -659,6 +677,9 @@ class MainWindow(QMainWindow):
         if not keywords:
             self.status_bar.showMessage("No hay palabras clave válidas")
             return
+
+        # Reescribe lista normalizada para evitar duplicados y persistir estado inicial limpio.
+        self.on_remaining_urls_updated(urls)
         
         # Get settings
         delay_ms = self.delay_spin.value()
@@ -679,7 +700,8 @@ class MainWindow(QMainWindow):
         asyncio.ensure_future(
             self.backend.run_scan(
                 urls, keywords, delay_ms, page_wait_ms, headless,
-                progress_callback=lambda stats: self.signals.progress.emit(stats)
+                progress_callback=lambda stats: self.signals.progress.emit(stats),
+                remaining_urls_callback=lambda remaining: self.signals.remaining_urls.emit(remaining)
             )
         )
         
