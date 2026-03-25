@@ -61,10 +61,15 @@ class ScannerBackend:
         self.base_dir = self._get_app_dir()
         self.runtime_dir = self.base_dir / 'runtime'
         self.profile_dir = self.runtime_dir / 'browser_profile'
-        self.playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
+        # Nueva ubicación preferida: junto al proyecto/.exe para que el
+        # navegador quede autocontenido y fácil de inspeccionar.
+        self.playwright_browsers_dir = self.base_dir / 'ms-playwright'
+        # Compatibilidad con instalaciones anteriores.
+        self.legacy_playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
         self.state_file = self.runtime_dir / 'scanner_state.json'
         self.auth_state_file = self.runtime_dir / 'auth_state.json'
         self._playwright_install_attempted = False
+        self._profile_reset_attempted = False
         
         self._ensure_directories()
 
@@ -79,6 +84,112 @@ class ScannerBackend:
         self.runtime_dir.mkdir(exist_ok=True)
         self.profile_dir.mkdir(exist_ok=True)
         self.playwright_browsers_dir.mkdir(exist_ok=True)
+
+    def _playwright_browser_dirs(self) -> List[Path]:
+        """
+        Return browser directories in lookup priority order.
+
+        `ms-playwright` es la ubicación preferida nueva. La carpeta en
+        `runtime/playwright-browsers` se conserva como fallback para no romper
+        instalaciones viejas.
+        """
+        browser_dirs = [self.playwright_browsers_dir]
+        if self.legacy_playwright_browsers_dir != self.playwright_browsers_dir:
+            browser_dirs.append(self.legacy_playwright_browsers_dir)
+        return browser_dirs
+
+    def _set_playwright_browsers_env(self):
+        """Point Playwright to the project-local browser cache."""
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+
+    def _find_local_chromium_executable(self, browser_dir: Path) -> Optional[Path]:
+        """
+        Search a browser cache directory for the Chromium executable.
+
+        Playwright versiona las carpetas como `chromium-<revision>`, por lo que
+        no se debe hardcodear la revisión esperada.
+        """
+        if not browser_dir.exists():
+            return None
+
+        patterns = [
+            'chromium-*/chrome-win/chrome.exe',
+            'chromium-*/chrome-win64/chrome.exe',
+            'chromium-*/chrome-linux/chrome',
+            'chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+        ]
+
+        matches: List[Path] = []
+        for pattern in patterns:
+            matches.extend(path for path in browser_dir.glob(pattern) if path.is_file())
+
+        if not matches:
+            return None
+
+        return sorted(matches)[-1]
+
+    def _find_any_local_chromium_executable(self) -> Optional[Path]:
+        """Return the first available Chromium executable in preferred/fallback dirs."""
+        for browser_dir in self._playwright_browser_dirs():
+            chromium_executable = self._find_local_chromium_executable(browser_dir)
+            if chromium_executable is not None:
+                return chromium_executable
+        return None
+
+    def _should_retry_with_clean_profile(self, error: Exception) -> bool:
+        """
+        Decide whether the browser profile should be reset after a launch failure.
+
+        Este retry solo se hace una vez por proceso para evitar bucles si el
+        fallo real no está relacionado con el perfil persistente.
+        """
+        if self._profile_reset_attempted:
+            return False
+
+        error_text = str(error).lower()
+        markers = (
+            'connection closed while reading from the driver',
+            'target page, context or browser has been closed',
+            'browser closed',
+        )
+        return any(marker in error_text for marker in markers)
+
+    def _reset_browser_profile(self) -> bool:
+        """
+        Backup the current Playwright profile and create a clean profile directory.
+
+        El snapshot extra de `auth_state.json` permite reconstruir cookies y
+        localStorage después del reset, así que un perfil limpio no implica
+        perder necesariamente la sesión.
+        """
+        if self._profile_reset_attempted:
+            return False
+
+        self._profile_reset_attempted = True
+
+        try:
+            if self.profile_dir.exists():
+                timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+                backup_dir = self.runtime_dir / f'browser_profile_backup_{timestamp}'
+                self.profile_dir.rename(backup_dir)
+                self.log(
+                    f"Perfil de navegador respaldado por fallo de arranque: {backup_dir}",
+                    'WARNING'
+                )
+
+            self.profile_dir.mkdir(exist_ok=True)
+            self.log("Se creó un perfil limpio de navegador para reintentar Playwright", 'WARNING')
+            return True
+        except Exception as reset_error:
+            self.log(
+                f"No se pudo recrear el perfil de navegador tras fallo de Playwright: {str(reset_error)}",
+                'ERROR'
+            )
+            try:
+                self.profile_dir.mkdir(exist_ok=True)
+            except Exception:
+                pass
+            return False
 
     def _load_auth_state_data(self) -> Optional[Dict[str, Any]]:
         """
@@ -200,29 +311,40 @@ class ScannerBackend:
     def _has_local_chromium(self) -> bool:
         """Check if local Playwright Chromium is already present."""
         try:
-            if not self.playwright_browsers_dir.exists():
-                return False
-            for child in self.playwright_browsers_dir.iterdir():
-                if child.is_dir() and child.name.startswith('chromium-'):
-                    return True
+            return self._find_any_local_chromium_executable() is not None
         except Exception:
             return False
-        return False
 
     def ensure_playwright_browser(self) -> bool:
-        """Ensure Playwright Chromium exists in local runtime directory."""
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+        """
+        Ensure Playwright Chromium exists in the project-local browser directory.
 
-        if self._has_local_chromium():
-            self.log("Chromium local de Playwright detectado")
+        Prioridad:
+        1. `./ms-playwright`
+        2. instalación legacy en `runtime/playwright-browsers`
+        3. descarga automática a `./ms-playwright`
+        """
+        self._set_playwright_browsers_env()
+
+        preferred_executable = self._find_local_chromium_executable(self.playwright_browsers_dir)
+        if preferred_executable is not None:
+            self.log(f"Chromium local detectado en ms-playwright: {preferred_executable}")
             return True
 
+        legacy_executable = self._find_local_chromium_executable(self.legacy_playwright_browsers_dir)
+
         if self._playwright_install_attempted:
+            if legacy_executable is not None:
+                self.log(
+                    f"Usando Chromium legacy en runtime/playwright-browsers: {legacy_executable}",
+                    'WARNING'
+                )
+                return True
             self.log("Ya se intentó instalar Chromium en esta sesión; se omite reintento", 'WARNING')
             return False
 
         self._playwright_install_attempted = True
-        self.log("Chromium local no encontrado. Descargando con Playwright...", 'WARNING')
+        self.log("Chromium no encontrado en ms-playwright. Descargando con Playwright...", 'WARNING')
 
         env = os.environ.copy()
         env['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
@@ -234,6 +356,12 @@ class ScannerBackend:
                     "Se usará Chromium local si existe o navegador del sistema (Chrome/Edge).",
                     'WARNING'
                 )
+                if legacy_executable is not None:
+                    self.log(
+                        f"Usando Chromium legacy en runtime/playwright-browsers: {legacy_executable}",
+                        'WARNING'
+                    )
+                    return True
                 return False
 
             cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
@@ -257,19 +385,39 @@ class ScannerBackend:
                     env=env
                 )
 
-            if self._has_local_chromium():
-                self.log("Playwright install: Chromium descargado correctamente")
+            preferred_executable = self._find_local_chromium_executable(self.playwright_browsers_dir)
+            if preferred_executable is not None:
+                self.log(f"Playwright install: Chromium descargado correctamente en {preferred_executable}")
                 return True
 
-            self.log("La instalación de Chromium finalizó pero no se detectó en runtime local", 'WARNING')
+            if legacy_executable is not None:
+                self.log(
+                    f"La descarga a ms-playwright no se detectó; se mantiene fallback legacy: {legacy_executable}",
+                    'WARNING'
+                )
+                return True
+
+            self.log("La instalación de Chromium finalizó pero no se detectó en ms-playwright", 'WARNING')
             return False
         except subprocess.CalledProcessError as e:
             self.log("No se pudo descargar Chromium local automáticamente", 'ERROR')
             if e.stderr:
                 self.log(e.stderr.strip()[-500:], 'ERROR')
+            if legacy_executable is not None:
+                self.log(
+                    f"Fallo la descarga nueva; se mantiene fallback legacy: {legacy_executable}",
+                    'WARNING'
+                )
+                return True
             return False
         except Exception as e:
             self.log(f"Error inesperado instalando Chromium local: {str(e)}", 'ERROR')
+            if legacy_executable is not None:
+                self.log(
+                    f"Fallo la descarga nueva; se mantiene fallback legacy: {legacy_executable}",
+                    'WARNING'
+                )
+                return True
             return False
 
     def get_url_preview(self, url: str) -> Dict[str, str]:
@@ -321,11 +469,48 @@ class ScannerBackend:
             'args': ['--disable-blink-features=AutomationControlled']
         }
 
+        local_chromium_executable = self._find_any_local_chromium_executable()
+        if local_chromium_executable is not None:
+            try:
+                context = await p.chromium.launch_persistent_context(
+                    user_data_dir=str(self.profile_dir),
+                    executable_path=str(local_chromium_executable),
+                    **launch_args
+                )
+                self.log(f"Contexto lanzado con Chromium local: {local_chromium_executable}")
+                return context
+            except Exception as local_launch_error:
+                self.log(
+                    "No se pudo lanzar el Chromium local detectado; intentando resolucion normal de Playwright",
+                    'WARNING'
+                )
+                self.log(f"Detalle Chromium local: {str(local_launch_error)}", 'WARNING')
+
+                if self._should_retry_with_clean_profile(local_launch_error) and self._reset_browser_profile():
+                    try:
+                        context = await p.chromium.launch_persistent_context(
+                            user_data_dir=str(self.profile_dir),
+                            executable_path=str(local_chromium_executable),
+                            **launch_args
+                        )
+                        self.log(
+                            f"Contexto lanzado con Chromium local tras recrear perfil: {local_chromium_executable}",
+                            'WARNING'
+                        )
+                        return context
+                    except Exception as retry_error:
+                        self.log(
+                            "El relanzamiento con perfil limpio tambien fallo; se intentara el fallback normal",
+                            'WARNING'
+                        )
+                        self.log(f"Detalle reintento Chromium local: {str(retry_error)}", 'WARNING')
+
         try:
             context = await p.chromium.launch_persistent_context(
                 user_data_dir=str(self.profile_dir),
                 **launch_args
             )
+            self.log("Contexto lanzado con resolucion normal de Playwright")
             return context
         except Exception as launch_error:
             self.log(
@@ -378,7 +563,7 @@ class ScannerBackend:
 
         try:
             self.ensure_playwright_browser()
-            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+            self._set_playwright_browsers_env()
 
             async with async_playwright() as p:
                 context = await self._launch_persistent_context(p, headless=True, width=width, height=height)
@@ -456,7 +641,7 @@ class ScannerBackend:
 
         try:
             self.ensure_playwright_browser()
-            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+            self._set_playwright_browsers_env()
 
             async with async_playwright() as p:
                 context = await self._launch_persistent_context(p, headless=False, width=1280, height=800)
@@ -738,7 +923,7 @@ class ScannerBackend:
         
         try:
             self.ensure_playwright_browser()
-            os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(self.playwright_browsers_dir)
+            self._set_playwright_browsers_env()
 
             async with async_playwright() as p:
                 self.context = await self._launch_persistent_context(
