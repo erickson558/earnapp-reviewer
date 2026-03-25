@@ -540,13 +540,72 @@ class ScannerBackend:
 
             return fallback_context
 
+    async def _launch_browser(self, p, headless: bool):
+        """
+        Launch an isolated browser process without reusing `runtime/browser_profile`.
+
+        El preview renderizado no debe compartir el `user_data_dir` del escaneo
+        ni de la autenticación interactiva, porque Playwright bloquea el perfil
+        persistente cuando dos navegadores intentan usarlo al mismo tiempo.
+        """
+        launch_args = {
+            'headless': headless,
+            'args': ['--disable-blink-features=AutomationControlled']
+        }
+
+        local_chromium_executable = self._find_any_local_chromium_executable()
+        if local_chromium_executable is not None:
+            try:
+                browser = await p.chromium.launch(
+                    executable_path=str(local_chromium_executable),
+                    **launch_args
+                )
+                self.log(f"Navegador aislado lanzado con Chromium local: {local_chromium_executable}")
+                return browser
+            except Exception as local_launch_error:
+                self.log(
+                    "No se pudo lanzar el navegador aislado con Chromium local; intentando fallback",
+                    'WARNING'
+                )
+                self.log(f"Detalle navegador aislado: {str(local_launch_error)}", 'WARNING')
+
+        try:
+            browser = await p.chromium.launch(**launch_args)
+            self.log("Navegador aislado lanzado con resolucion normal de Playwright")
+            return browser
+        except Exception as launch_error:
+            self.log(
+                "Chromium local no disponible para preview; intentando navegador del sistema (Chrome/Edge)",
+                'WARNING'
+            )
+            self.log(f"Detalle preview Chromium: {str(launch_error)}", 'WARNING')
+
+            fallback_browser = None
+            fallback_errors = []
+            for channel in ('chrome', 'msedge'):
+                try:
+                    fallback_browser = await p.chromium.launch(
+                        channel=channel,
+                        **launch_args
+                    )
+                    self.log(f"Navegador aislado lanzado con canal del sistema: {channel}")
+                    break
+                except Exception as channel_error:
+                    fallback_errors.append(f"{channel}: {str(channel_error)}")
+
+            if fallback_browser is None:
+                if fallback_errors:
+                    self.log(" | ".join(fallback_errors), 'ERROR')
+                raise launch_error
+
+            return fallback_browser
+
     async def get_live_url_preview(self, url: str, width: int = 900, height: int = 620) -> Dict[str, Any]:
         """
         Load URL with Playwright and return text preview + screenshot bytes.
 
-        El preview usa el mismo perfil persistente del escaneo para que el
-        contenido visual y el estado de login coincidan con lo que verá el
-        navegador real de la app.
+        El preview reutiliza el estado autenticado serializado, pero se renderiza
+        en un contexto aislado para no bloquear el perfil persistente del escaneo.
         """
         normalized_url = url.strip()
         if not normalized_url:
@@ -559,6 +618,7 @@ class ScannerBackend:
                 'screenshot': None
             }
 
+        browser = None
         context = None
 
         try:
@@ -566,7 +626,10 @@ class ScannerBackend:
             self._set_playwright_browsers_env()
 
             async with async_playwright() as p:
-                context = await self._launch_persistent_context(p, headless=True, width=width, height=height)
+                browser = await self._launch_browser(p, headless=True)
+                context = await browser.new_context(
+                    viewport={'width': width, 'height': height}
+                )
                 await self._restore_auth_state(context)
 
                 await context.set_extra_http_headers({
@@ -623,6 +686,11 @@ class ScannerBackend:
                         log_closed_warning=False,
                     )
                     await context.close()
+            except Exception:
+                pass
+            try:
+                if browser:
+                    await browser.close()
             except Exception:
                 pass
 
