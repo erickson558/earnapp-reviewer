@@ -5,6 +5,22 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [V1.6.0] - 2026-03-25
+
+### 🐛 Fixed
+- La sesión interactiva ahora guarda snapshots de autenticación mientras el navegador sigue abierto, evitando perder `auth_state.json` al cerrar la ventana de login
+- El textfield del preview vuelve a alinearse con la cola restante y se limpia cuando ya no quedan URLs
+- Se elimina el ruido de warnings repetidos al intentar guardar auth state sobre contextos ya cerrados
+
+### ✨ Added
+- Nuevo módulo `versioning.py` para centralizar formato visible `Vx.x.x` y conversión a versión compatible con empaquetado
+- Workflow de GitHub Actions renovado para compilar el `.exe` en Windows, crear tag y publicar release automático en cada push a `main`
+
+### 🛠️ Improved
+- `build.py` ahora usa `python -m PyInstaller` para builds más reproducibles en local y CI
+- `README.md` fue reescrito para alinear instalación, compilación, versionado y release con el estado real del proyecto
+- Se reforzó la documentación inline de `backend.py`, `gui.py`, `main.py` y scripts asociados
+
 ## [1.5.5] - 2026-03-12
 
 ### 🐛 Fixed

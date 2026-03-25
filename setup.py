@@ -5,9 +5,11 @@ Setup script for EarnApp Reviewer
 from setuptools import setup, find_packages
 from pathlib import Path
 
+from versioning import pep440_version, read_version_file
+
 # Read version
 version_file = Path(__file__).parent / 'VERSION'
-version = version_file.read_text().strip() if version_file.exists() else '1.0.0'
+version = pep440_version(read_version_file(version_file))
 
 # Read long description
 readme_file = Path(__file__).parent / 'README.md'
@@ -21,7 +23,7 @@ setup(
     long_description_content_type='text/markdown',
     author='Synyster Rick',
     license='Apache License 2.0',
-    url='https://github.com/YOUR_USERNAME/earnapp-reviewer',
+    url='https://github.com/erickson558/earnapp-reviewer',
     packages=find_packages(),
     python_requires='>=3.9',
     install_requires=[

@@ -1,6 +1,14 @@
 """
-EarnApp Reviewer - GUI Module
-Qt6-based graphical user interface with all modern features.
+EarnApp Reviewer - GUI Module.
+
+Este archivo contiene la capa visual de la aplicación:
+- formulario principal
+- sincronización de controles con `config.json`
+- coordinación entre eventos Qt y tareas `asyncio`
+- actualización del panel de preview y estadísticas
+
+La lógica de navegador/escaneo vive en `backend.py`; aquí solo se orquesta
+la interacción del usuario con esa lógica.
 
 Author: Synyster Rick
 License: Apache License 2.0
@@ -23,10 +31,11 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QPixmap
 
 from backend import ScannerBackend
+from versioning import DEFAULT_VERSION, read_version_file
 
 
 class ConfigManager:
-    """Manages application configuration."""
+    """Manages application configuration stored in config.json."""
     
     def __init__(self, config_path: Path, app_version: str):
         self.config_path = config_path
@@ -34,7 +43,12 @@ class ConfigManager:
         self.config = self._load_config()
     
     def _load_config(self) -> dict:
-        """Load configuration from file."""
+        """
+        Load configuration from file.
+
+        Se hace merge con defaults para soportar upgrades donde aparezcan
+        nuevas claves sin romper configuraciones existentes del usuario.
+        """
         default_config = {
             "version": self.app_version,
             "window": {"width": 900, "height": 700, "x": 100, "y": 100},
@@ -84,7 +98,7 @@ class ConfigManager:
 
 
 class WorkerSignals(QObject):
-    """Signals for worker thread communication."""
+    """Qt signals used to bridge backend callbacks and the GUI thread."""
     finished = pyqtSignal()
     error = pyqtSignal(str)
     progress = pyqtSignal(dict)
@@ -98,24 +112,24 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        # Paths
+        # Paths base para recursos y archivos persistentes.
         self.base_dir = self._get_app_dir()
         self.config_path = self.base_dir / 'config.json'
         self.version_path = self.base_dir / 'VERSION'
         self.icon_path = self.base_dir / 'business-color_money-coins_icon-icons.com_53446.ico'
         
-        # Load version
+        # `VERSION` es la fuente de verdad de la versión visible en la app.
         self.version = self._load_version()
         
-        # Configuration manager
+        # Configuración persistente de GUI/ejecución.
         self.config_manager = ConfigManager(self.config_path, self.version)
         if self.config_manager.get('version') != self.version:
             self.config_manager.set('version', self.version)
         
-        # Backend
+        # Backend desacoplado que encapsula Playwright y el escaneo.
         self.backend = ScannerBackend(log_callback=self.on_log_message)
         
-        # Signals
+        # Señales Qt usadas para pasar eventos del backend a la UI.
         self.signals = WorkerSignals()
         self.signals.progress.connect(self.update_progress)
         self.signals.log.connect(self.append_log)
@@ -126,7 +140,8 @@ class MainWindow(QMainWindow):
         self.auto_close_timer.timeout.connect(self.countdown_tick)
         self.auto_close_countdown = 0
 
-        # Realtime preview state
+        # Estado del preview en tiempo real. Sirve para debounce, evitar
+        # renderizados duplicados y seguir la URL activa del carrusel.
         self._preview_loading = False
         self._pending_preview_url: Optional[str] = None
         self._last_preview_url = ""
@@ -153,18 +168,16 @@ class MainWindow(QMainWindow):
         return Path(__file__).resolve().parent
     
     def _load_version(self) -> str:
-        """Load version from VERSION file."""
+        """Load display version from VERSION file."""
         try:
-            if self.version_path.exists():
-                with open(self.version_path, 'r') as f:
-                    return f.read().strip()
+            return read_version_file(self.version_path, default=DEFAULT_VERSION)
         except Exception:
             pass
-        return "1.0.0"
+        return DEFAULT_VERSION
     
     def init_ui(self):
         """Initialize user interface."""
-        self.setWindowTitle(f"EarnApp Reviewer v{self.version}")
+        self.setWindowTitle(f"EarnApp Reviewer {self.version}")
         
         # Set icon if available
         if self.icon_path.exists():
@@ -178,11 +191,11 @@ class MainWindow(QMainWindow):
         # Menu bar
         self.create_menu_bar()
         
-        # Control Panel
+        # Panel principal de control del proceso.
         control_group = QGroupBox("Control Panel")
         control_layout = QVBoxLayout()
         
-        # Delay settings
+        # Tiempos de espera configurables para navegación y ritmo del carrusel.
         delay_layout = QHBoxLayout()
         delay_layout.addWidget(QLabel("Espera entre URLs (ms):"))
         self.delay_spin = QSpinBox()
@@ -204,7 +217,7 @@ class MainWindow(QMainWindow):
         delay_layout.addStretch()
         control_layout.addLayout(delay_layout)
         
-        # Buttons
+        # Botones principales de operación.
         buttons_layout = QHBoxLayout()
         
         self.start_btn = QPushButton("&Iniciar")
@@ -234,7 +247,7 @@ class MainWindow(QMainWindow):
         control_group.setLayout(control_layout)
         main_layout.addWidget(control_group)
         
-        # Options
+        # Opciones de ejecución y calidad de vida.
         options_group = QGroupBox("Opciones")
         options_layout = QVBoxLayout()
         
@@ -277,7 +290,7 @@ class MainWindow(QMainWindow):
         options_group.setLayout(options_layout)
         main_layout.addWidget(options_group)
         
-        # Statistics
+        # Métricas visibles del ciclo de escaneo actual.
         stats_group = QGroupBox("Estadísticas")
         stats_layout = QHBoxLayout()
         
@@ -297,7 +310,7 @@ class MainWindow(QMainWindow):
         stats_group.setLayout(stats_layout)
         main_layout.addWidget(stats_group)
         
-        # State buttons
+        # Acciones manuales para guardar/restaurar la cola.
         state_layout = QHBoxLayout()
         
         save_btn = QPushButton("&Guardar estado")
@@ -317,7 +330,7 @@ class MainWindow(QMainWindow):
         state_layout.addStretch()
         main_layout.addLayout(state_layout)
         
-        # URLs input
+        # Cola editable de URLs fuente.
         urls_group = QGroupBox("URLs (una por línea)")
         urls_layout = QVBoxLayout()
         self.urls_text = QTextEdit()
@@ -331,7 +344,7 @@ class MainWindow(QMainWindow):
         urls_group.setLayout(urls_layout)
         main_layout.addWidget(urls_group)
 
-        # URL preview
+        # Panel de preview: URL activa, screenshot y snippet textual.
         preview_group = QGroupBox("Preview de URL")
         preview_layout = QVBoxLayout()
 
@@ -349,7 +362,7 @@ class MainWindow(QMainWindow):
 
         preview_layout.addLayout(preview_controls)
 
-        # Screenshot display
+        # Vista previa visual renderizada con Playwright.
         self.preview_image_label = QLabel()
         self.preview_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f9f9f9;")
@@ -368,7 +381,7 @@ class MainWindow(QMainWindow):
         preview_group.setLayout(preview_layout)
         main_layout.addWidget(preview_group)
         
-        # Keywords input
+        # Palabras clave que determinan si una URL se elimina de la cola.
         keywords_group = QGroupBox("Palabras clave (una por línea o separadas por coma)")
         keywords_layout = QVBoxLayout()
         self.keywords_text = QTextEdit()
@@ -381,10 +394,10 @@ class MainWindow(QMainWindow):
         keywords_group.setLayout(keywords_layout)
         main_layout.addWidget(keywords_group)
         
-        # Status bar
+        # Barra inferior para mensajes cortos de estado.
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage(f"EarnApp Reviewer v{self.version} - Listo")
+        self.status_bar.showMessage(f"EarnApp Reviewer {self.version} - Listo")
         
         # Set initial size from config
         window_config = self.config_manager.get('window', {})
@@ -422,7 +435,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "Acerca de EarnApp Reviewer",
-            f"<h3>EarnApp Reviewer v{self.version}</h3>"
+            f"<h3>EarnApp Reviewer {self.version}</h3>"
             f"<p>Creado por <b>Synyster Rick</b></p>"
             f"<p>© {year} Todos los Derechos Reservados</p>"
             f"<p>Licencia: Apache License 2.0</p>"
@@ -452,7 +465,13 @@ class MainWindow(QMainWindow):
         self.signals.log.emit(message)
 
     def on_remaining_urls_updated(self, remaining_urls: List[str]):
-        """Keep URLs textbox and config synchronized with queue after removals."""
+        """
+        Keep URLs textbox, config and preview aligned with the live queue.
+
+        Este callback llega desde el backend cuando una URL se elimina o cuando
+        se guarda el estado final. Aquí es donde forzamos que el campo de
+        preview deje de mostrar URLs antiguas.
+        """
         normalized_text = '\n'.join(remaining_urls)
         current_text = self.urls_text.toPlainText().strip()
 
@@ -464,7 +483,7 @@ class MainWindow(QMainWindow):
         self.urls_text.blockSignals(False)
 
         self.config_manager.set('urls', normalized_text)
-        self.sync_preview_url_from_list()
+        self.sync_preview_url_from_list(force=True)
         self.schedule_preview_refresh(180)
     
     def append_log(self, message: str):
@@ -500,7 +519,31 @@ class MainWindow(QMainWindow):
         # Reset last preview cache so each new runtime URL renders immediately.
         self._last_preview_url = ""
         self.schedule_preview_refresh(150)
-    
+
+    def _set_preview_url_input(self, url: str):
+        """Update the preview URL textbox without re-entrant signal noise."""
+        normalized = url.strip()
+        current = self.preview_url_input.text().strip()
+        if current == normalized:
+            return
+
+        self.preview_url_input.blockSignals(True)
+        self.preview_url_input.setText(normalized)
+        self.preview_url_input.blockSignals(False)
+
+    def _clear_preview_panel(self, message: str = "No hay URL para previsualizar"):
+        """
+        Reset preview widgets when there is no active URL to render.
+
+        Esto evita que la captura o el texto anterior se queden visibles cuando
+        la cola ya está vacía o cuando el usuario limpia la lista.
+        """
+        self._last_preview_url = ""
+        self._pending_preview_url = None
+        self.preview_text.setPlainText(message)
+        self.preview_image_label.clear()
+        self.preview_image_label.setText("La captura de pantalla aparecerá aquí")
+
     def update_progress(self, stats: dict):
         """Update progress display."""
         self.pending_label.setText(f"Pendientes: {stats.get('pending', 0)}")
@@ -516,19 +559,29 @@ class MainWindow(QMainWindow):
         if current_url and current_url != '-':
             self._follow_runtime_url(current_url)
 
-    def sync_preview_url_from_list(self):
-        """Keep preview URL aligned: runtime URL first, then first URL from list."""
+    def sync_preview_url_from_list(self, force: bool = False):
+        """
+        Keep preview URL aligned with the active runtime URL or the first queued URL.
+
+        Args:
+            force: When True, overwrite stale text already present in the input.
+        """
         if self.backend.is_running and self._last_runtime_preview_url:
             self._follow_runtime_url(self._last_runtime_preview_url)
             return
 
-        if self.preview_url_input.text().strip():
+        current_preview_url = self.preview_url_input.text().strip()
+        if current_preview_url and not force:
             return
 
         urls = self.backend.normalize_urls(self.urls_text.toPlainText())
         if urls:
-            self.preview_url_input.setText(urls[0])
+            self._set_preview_url_input(urls[0])
             self.schedule_preview_refresh(200)
+            return
+
+        self._set_preview_url_input("")
+        self._clear_preview_panel()
 
     def on_preview_url_changed(self, _text: str):
         """Handle URL input changes and trigger realtime preview."""
@@ -545,10 +598,11 @@ class MainWindow(QMainWindow):
             urls = self.backend.normalize_urls(self.urls_text.toPlainText())
             if urls:
                 target_url = urls[0]
-                self.preview_url_input.setText(target_url)
+                self._set_preview_url_input(target_url)
 
         if not target_url:
             self.status_bar.showMessage("No hay URL para previsualizar")
+            self._clear_preview_panel()
             return
 
         if self._preview_loading:
@@ -562,6 +616,8 @@ class MainWindow(QMainWindow):
         self._pending_preview_url = None
         self._last_preview_url = target_url
         self.preview_text.setPlainText("Cargando preview...")
+        self.preview_image_label.setPixmap(QPixmap())
+        self.preview_image_label.setText("Cargando vista en miniatura...")
         asyncio.ensure_future(self._load_preview_async(target_url))
 
     async def _load_preview_async(self, url: str):
@@ -577,7 +633,6 @@ class MainWindow(QMainWindow):
             )
             self.preview_text.setPlainText(preview_text)
 
-            self.preview_image_label.setText("Cargando vista en miniatura...")
             screenshot_bytes = preview.get('screenshot')
 
             if screenshot_bytes:
@@ -647,6 +702,7 @@ class MainWindow(QMainWindow):
             if ok:
                 self.status_bar.showMessage("Sesión actualizada. Refrescando preview...")
                 self._last_preview_url = ""
+                self.sync_preview_url_from_list(force=True)
                 self.schedule_preview_refresh(100)
             else:
                 self.status_bar.showMessage("No se pudo completar la autenticación")
@@ -678,7 +734,8 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("No hay palabras clave válidas")
             return
 
-        # Reescribe lista normalizada para evitar duplicados y persistir estado inicial limpio.
+        # Reescribe lista normalizada para evitar duplicados y persistir
+        # un estado inicial consistente antes de arrancar el carrusel.
         self.on_remaining_urls_updated(urls)
         
         # Get settings
@@ -733,6 +790,7 @@ class MainWindow(QMainWindow):
         if self._auth_after_stop_requested:
             self.status_bar.showMessage("Escaneo detenido. Iniciando sesión...")
         else:
+            self.sync_preview_url_from_list(force=True)
             self.status_bar.showMessage("Escaneo finalizado")
     
     def stop_scan(self):
@@ -774,6 +832,7 @@ class MainWindow(QMainWindow):
             
             self.urls_text.setPlainText('\n'.join(urls))
             self.keywords_text.setPlainText('\n'.join(keywords))
+            self.sync_preview_url_from_list(force=True)
             
             stats = state.get('stats', {})
             self.update_progress(stats)
@@ -785,6 +844,7 @@ class MainWindow(QMainWindow):
     def clear_state(self):
         """Clear saved state."""
         self.backend.clear_state()
+        self.sync_preview_url_from_list(force=True)
         self.status_bar.showMessage("Estado limpiado correctamente")
     
     def closeEvent(self, event):

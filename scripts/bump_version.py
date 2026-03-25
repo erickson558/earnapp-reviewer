@@ -3,36 +3,14 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def parse_version(raw: str) -> tuple[int, int, int]:
-    parts = raw.strip().split('.')
-    if len(parts) != 3:
-        raise ValueError(f"Invalid version '{raw}'. Expected MAJOR.MINOR.PATCH")
-
-    major, minor, patch = (int(part) for part in parts)
-    return major, minor, patch
-
-
-def format_version(major: int, minor: int, patch: int) -> str:
-    return f"{major}.{minor}.{patch}"
-
-
-def bump(current: str, part: str) -> str:
-    major, minor, patch = parse_version(current)
-
-    if part == 'major':
-        major += 1
-        minor = 0
-        patch = 0
-    elif part == 'minor':
-        minor += 1
-        patch = 0
-    else:
-        patch += 1
-
-    return format_version(major, minor, patch)
+from versioning import bump_version
 
 
 def main() -> int:
@@ -41,7 +19,7 @@ def main() -> int:
     parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     version_file = repo_root / 'VERSION'
     config_file = repo_root / 'config.json'
 
@@ -49,7 +27,7 @@ def main() -> int:
         raise FileNotFoundError(f"VERSION file not found: {version_file}")
 
     current_version = version_file.read_text(encoding='utf-8').strip()
-    next_version = bump(current_version, args.part)
+    next_version = bump_version(current_version, args.part)
     version_file.write_text(next_version + '\n', encoding='utf-8')
 
     if config_file.exists():

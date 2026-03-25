@@ -1,70 +1,86 @@
-name: Release on Push to Main
+name: Build and Release
 
 on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'README.md'
-      - 'docs/**'
-      - '.gitignore'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    
+  build-release:
+    runs-on: windows-latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install wheel setuptools
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-build.txt
 
-      - name: Read VERSION
+      - name: Read version
         id: version
+        shell: pwsh
         run: |
-          VERSION=$(cat VERSION)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          $version = (Get-Content VERSION -Raw).Trim()
+          if (-not $version) {
+            throw "VERSION file is empty"
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Verify files
+      - name: Validate Python sources
         run: |
-          echo "Checking for executable..."
-          [ -f "EarnApp-Reviewer.exe" ] && echo "✓ EarnApp-Reviewer.exe found ($(du -h EarnApp-Reviewer.exe | cut -f1))" || echo "⚠ EarnApp-Reviewer.exe not found"
-          echo ""
-          echo "Checking for source files..."
-          [ -f "main.py" ] && echo "✓ main.py found" || echo "⚠ main.py not found"
-          [ -f "gui.py" ] && echo "✓ gui.py found" || echo "⚠ gui.py not found"
-          [ -f "backend.py" ] && echo "✓ backend.py found" || echo "⚠ backend.py not found"
+          python -m compileall backend.py gui.py main.py versioning.py build.py scripts\bump_version.py
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Build executable
+        run: |
+          python build.py
+
+      - name: Create version tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.value }}"
+          git fetch --tags
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.value }}
+          name: Release ${{ steps.version.outputs.value }}
           body_path: CHANGELOG.md
           files: |
             EarnApp-Reviewer.exe
-            requirements.txt
-          draft: false
-          prerelease: false
+            VERSION
+          fail_on_unmatched_files: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
+      - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: distributions
-          path: dist/
+          name: earnapp-reviewer-${{ steps.version.outputs.value }}
+          path: EarnApp-Reviewer.exe
           retention-days: 30

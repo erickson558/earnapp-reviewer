@@ -1,300 +1,201 @@
 # EarnApp Reviewer
 
-<div align="center">
+Aplicación de escritorio en Python para recorrer URLs de EarnApp con un navegador real, detectar coincidencias por palabras clave y eliminar automáticamente los enlaces encontrados de la cola de trabajo.
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
-![PyQt6](https://img.shields.io/badge/PyQt6-6.7.0-green.svg)
-![License](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)
-![Status](https://img.shields.io/badge/Status-Active-success.svg)
+Repositorio: `https://github.com/erickson558/earnapp-reviewer`
+Versión actual: `V1.6.0`
+Licencia: `Apache License 2.0`
 
-**Aplicación automatizada para escanear URLs de EarnApp, detectar coincidencias por palabras clave y eliminar automáticamente URLs de la cola.**
+## Descripción
 
-</div>
+El proyecto combina `PyQt6`, `qasync` y `Playwright` para ofrecer una GUI que:
 
----
+- mantiene una cola de URLs editable
+- abre un navegador real para revisar cada URL
+- detecta coincidencias por palabras clave
+- elimina las URLs resueltas de la cola restante
+- guarda estado, configuración y sesión entre ejecuciones
+- permite validar el login con un preview visual antes de lanzar el escaneo
 
-## 🚀 Características
+## Funcionalidades
 
-### Funcionalidades Principales
-- ✅ **Escaneo automatizado circular e infinito** con navegador real usando Playwright
-- ✅ **Interfaz gráfica moderna** con PyQt6
-- ✅ **Detección inteligente** de palabras clave (tolerante a variaciones)
-- ✅ **Persistencia de estado** - guarda y restaura progreso
-- ✅ **Configuración flexible** - archivo config.json personalizable
-- ✅ **Logs detallados** con timestamps
+- Escaneo circular continuo hasta detener manualmente el proceso.
+- Preview visual y textual de la URL activa usando el mismo contexto de navegador.
+- Persistencia de sesión en `runtime/browser_profile` y respaldo en `runtime/auth_state.json`.
+- Inicio de sesión asistido desde la GUI con refresco automático del preview.
+- Sincronización de la cola restante con el textfield de preview.
+- Guardado y carga de estado en `runtime/scanner_state.json`.
+- Build local a `.exe` con `PyInstaller`.
+- Versionado centralizado en formato `Vx.x.x`.
+- Release automático en GitHub Actions al hacer push a `main`.
 
-### Características de la GUI
-- 🔄 **Inicio/Parada** del escaneo en tiempo real
-- 📊 **Estadísticas en vivo** - pendientes, procesadas, eliminadas
-- ⚙️ **Configuración de retardos** personalizables (ms)
-- 🚀 **Auto-inicio** opcional al abrir la aplicación
-- ⏱️ **Auto-cierre** configurable después de N segundos
-- 💾 **Guardado automático** de configuración
-- 📍 **Recuerda posición** de ventana
-- 🎯 **Atajos de teclado** Windows-style (Ctrl+I, Ctrl+D, etc.)
-- 📋 **Barra de estado** con información sin popups
-- 🔒 **Modo Headless** opcional para navegador silencioso
+## Dependencias
 
-### Características de Seguridad
-- ✅ Sin vulnerabilidades OWASP comunes
-- ✅ Validación de URLs
-- ✅ Sanitización de entrada
-- ✅ Manejo seguro de archivos
-- ✅ Sin permisos administrativos requeridos
+Runtime principal:
 
-## 📋 Requisitos
+- Python 3.10+
+- PyQt6
+- qasync
+- playwright
+- requests
+- beautifulsoup4
+- lxml
 
-- **Python** 3.9 o superior
-- **Windows** (probado en Windows 10/11)
-- **Conexión a Internet** para descargar navegadores Playwright
+Build:
 
-## 📦 Instalación
+- PyInstaller
 
-### 1. Clonar el repositorio
+Consulta dependencias exactas en [requirements.txt](requirements.txt) y [requirements-build.txt](requirements-build.txt).
+
+## Instalación
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/earnapp-reviewer.git
+git clone https://github.com/erickson558/earnapp-reviewer.git
 cd earnapp-reviewer
-```
-
-### 2. Crear ambiente virtual
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
-# Linux/Mac
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 3. Instalar dependencias
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Instalar navegadores Playwright
-```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-### 5. Ejecutar la aplicación
+## Uso
+
+1. Ejecuta `python main.py`.
+2. Pega las URLs, una por línea, en el bloque principal.
+3. Define las palabras clave que disparan la eliminación de la URL.
+4. Si la cuenta requiere autenticación, pulsa `Iniciar sesión`, completa el login y cierra esa ventana.
+5. Revisa el panel `Preview de URL` para confirmar que la sesión está activa.
+6. Pulsa `Iniciar` para arrancar el escaneo.
+
+Atajos disponibles:
+
+- `Ctrl+I`: iniciar escaneo
+- `Ctrl+D`: detener escaneo
+- `Ctrl+S`: abrir login asistido
+- `Ctrl+G`: guardar estado
+- `Ctrl+L`: cargar estado
+- `Ctrl+Q`: salir
+- `F1`: acerca de
+
+## Archivos importantes
+
+```text
+earnappreviewer/
+├── main.py
+├── gui.py
+├── backend.py
+├── versioning.py
+├── build.py
+├── config.json
+├── VERSION
+├── runtime/
+│   ├── auth_state.json
+│   ├── browser_profile/
+│   └── scanner_state.json
+├── .github/workflows/release.yml
+├── requirements.txt
+├── requirements-build.txt
+└── EarnApp-Reviewer.exe
+```
+
+## Configuración y estado
+
+`config.json` guarda la configuración operativa y la versión visible de la app.
+
+Campos relevantes:
+
+- `version`: versión visible en formato `Vx.x.x`
+- `delay_ms`: pausa entre URLs
+- `page_wait_ms`: espera adicional tras cargar la página
+- `headless`: usa navegador sin interfaz durante el escaneo
+- `keywords`: lista de coincidencias
+- `urls`: cola actual de URLs
+
+Archivos de runtime:
+
+- `runtime/browser_profile`: perfil persistente de Playwright
+- `runtime/auth_state.json`: snapshot adicional de cookies/localStorage
+- `runtime/scanner_state.json`: cola restante y estadísticas del escaneo
+- `log.txt`: historial técnico de ejecución
+
+## Compilación
+
+Comando recomendado:
+
 ```bash
-# Usando Python directamente
-python main.py
-
-# O instalar como paquete de desarrollo
-pip install -e .
-earnapp-reviewer
+python build.py
 ```
 
-## 🎮 Uso
+Comando exacto que ejecuta el script de build:
 
-### Interfaz Gráfica
-1. Abre la aplicación: `python main.py`
-2. Introduce las URLs (una por línea)
-3. Configura las palabras clave a buscar
-4. Ajusta los parámetros (retardos, etc.)
-5. Presiona **Iniciar** (Ctrl+I)
-6. El programa navegará, buscará y eliminará URLs automáticamente
-
-### Configuración
-Edita `config.json`:
-```json
-{
-    "version": "1.5.4",
-    "auto_start": false,
-    "auto_close_enabled": false,
-    "auto_close_seconds": 60,
-    "delay_ms": 3500,
-    "page_wait_ms": 8000,
-    "headless": false,
-    "keywords": "keyword1\nkeyword2",
-    "urls": "https://example.com\nhttps://example2.com"
-}
+```bash
+python -m PyInstaller --noconfirm --onefile --windowed --name=EarnApp-Reviewer --distpath=. --specpath=build --workpath=build/work --hidden-import=qasync --collect-all=qasync --exclude-module=PySide6 --exclude-module=PyQt5 --exclude-module=PySide2 --icon="business-color_money-coins_icon-icons.com_53446.ico" main.py
 ```
 
-### Atajos de Teclado
-- **Ctrl+I** - Iniciar escaneo
-- **Ctrl+D** - Detener escaneo
-- **Ctrl+Q** - Salir
-- **Ctrl+G** - Guardar estado
-- **Ctrl+L** - Cargar estado
-- **F1** - Acerca de
+Resultado esperado:
 
-## 📁 Estructura del Proyecto
+- genera `EarnApp-Reviewer.exe`
+- deja el `.exe` en la raíz del proyecto
+- usa el `.ico` local de la carpeta
+- no muestra consola porque se compila como app GUI
 
-```
-earnapp-reviewer/
-├── main.py              # Punto de entrada
-├── gui.py               # Interfaz gráfica (PyQt6)
-├── backend.py           # Lógica de escaneo (Playwright)
-├── config.json          # Configuración de aplicación
-├── VERSION              # Versión actual
-├── requirements.txt     # Dependencias Python
-├── setup.py             # Configuración de instalación
-├── .gitignore           # Archivos ignorados en Git
-├── icon.ico             # Icono de aplicación (opcional)
-├── log.txt              # Archivo de logs
-├── runtime/             # Directorio de runtime
-│   ├── scanner_state.json
-│   └── browser_profile/
-└── README.md            # Este archivo
+## Versionado
+
+La fuente de verdad es [VERSION](VERSION).
+
+Reglas:
+
+- formato oficial: `Vx.x.x`
+- `VERSION`, `config.json`, GUI, tag y release deben coincidir
+- `scripts/bump_version.py` acepta `major`, `minor` o `patch`
+
+Ejemplos:
+
+```bash
+python scripts/bump_version.py --part patch
+python scripts/bump_version.py --part minor
+python scripts/bump_version.py --part major
 ```
 
-## 🔄 Versionado
-
-Este proyecto usa **Semantic Versioning** (SemVer): `MAJOR.MINOR.PATCH`
-
-- **PATCH** (1.0.x) - Correcciones y ajustes compatibles
-- **MINOR** (1.x.0) - Funcionalidades nuevas compatibles
-- **MAJOR** (x.0.0) - Cambios incompatibles
-
-### Versionado automático por commit
-
-Para forzar nueva versión en cada commit:
+El hook `.githooks/pre-commit` sigue incrementando `PATCH` automáticamente si está habilitado con:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-Con esto, cada `git commit` ejecuta `scripts/bump_version.py` y sube automáticamente el `PATCH` en `VERSION` y `config.json`.
-Recomendación: actualiza también `CHANGELOG.md` en el mismo commit para mantener trazabilidad completa en GitHub.
+## GitHub Actions y release automático
 
-### Historial de Versiones
+El workflow [release.yml](.github/workflows/release.yml) hace lo siguiente en cada push a `main`:
 
-#### v1.5.4 (2026-03-05)
-- 🔁 El preview de URL sigue automáticamente la URL activa del carrusel durante el escaneo
-- 📌 Sincronización adicional por logs: si la URL activa se detecta en barra/log, el preview se actualiza
-- 🧭 Consistencia de versionado reforzada entre `VERSION`, `config.json`, app y repositorio
+- lee `VERSION`
+- instala dependencias de runtime y build
+- compila `EarnApp-Reviewer.exe` en `windows-latest`
+- crea el tag de la versión si todavía no existe
+- publica un release en GitHub
+- adjunta el `.exe` al release
 
-#### v1.5.3 (2026-03-03)
-- 🔁 Escaneo de cola circular e infinito hasta detener manualmente
-- 🧠 Ajuste dinámico de índices al eliminar URLs encontradas
-- 🏷️ Versionado sincronizado entre `VERSION`, app y metadata
-- 🧰 Build robusto con detección automática de icono local `.ico`
+## Troubleshooting
 
-### Política Recomendada De Versionado
+- Si el preview redirige a `Sign In`, abre `Iniciar sesión`, completa el login y cierra esa ventana para que el snapshot se vuelva a guardar.
+- Si Playwright no encuentra Chromium local, la app intentará usar `Chrome` o `Microsoft Edge`.
+- Si necesitas revisar errores, consulta `log.txt`.
+- Si el build falla por herramientas faltantes, instala `python -m pip install -r requirements-build.txt`.
 
-Para mantener consistencia de versiones en todos lados:
+## Desarrollo
 
-- `VERSION` es la fuente de verdad de la versión de la app
-- `config.json` se sincroniza automáticamente en cada commit
-- La GUI muestra la versión cargada desde `VERSION`
-- GitHub debe reflejar la misma versión en changelog/releases/tags
-
-Flujo recomendado por commit:
+Validación rápida:
 
 ```bash
-git add .
-git commit -m "tipo: descripción del cambio"
-git push origin main
+python -m compileall backend.py gui.py versioning.py build.py scripts\bump_version.py
 ```
 
-Con `.githooks/pre-commit` activo, cada commit incrementa `PATCH` automáticamente y agrega `VERSION` + `config.json` al commit.
-
-## 🛠️ Desarrollo
-
-### Configurar entorno de desarrollo
-```bash
-# Activar virtual environment
-venv\Scripts\activate
-
-# Instalar dependencias de desarrollo
-pip install -r requirements.txt
-pip install pytest black pylint
-
-# Ejecutar linter
-pylint main.py gui.py backend.py
-
-# Ejecutar tests (cuando estén disponibles)
-pytest
-```
-
-### Mejoras Prácticas Implementadas
-- ✅ Separación clara de backend/frontend
-- ✅ Manejo de errores robusto
-- ✅ Logging detallado
-- ✅ Validación de entrada
-- ✅ Type hints en Python
-- ✅ Docstrings completos
-- ✅ Configuración externa (config.json)
-- ✅ Sin variables hardcodeadas
-
-## 🚀 Compilación como EXE
-
-Usa **PyInstaller** para crear ejecutable:
+Build local:
 
 ```bash
-pip install pyinstaller
-
-# Compilar
 python build.py
-
-# El ejecutable estará en la raíz del proyecto: EarnApp-Reviewer.exe
 ```
 
-## 📝 Logs
+## Licencia
 
-Los logs se guardan automáticamente en `log.txt` con timestamps:
-```
-[2026-03-03 14:30:45] [INFO] Escaneo iniciado
-[2026-03-03 14:30:47] [INFO] Navegando a: https://example.com
-[2026-03-03 14:30:52] [INFO] ✓ Encontrado: 'successful' en https://example.com
-```
-
-## 🔐 Seguridad
-
-Esta aplicación includes:
-- ✅ Validación de URLs
-- ✅ Sanitización de entrada de usuario
-- ✅ Sin vulnerabilidades CSRF
-- ✅ Sin inyección de código
-- ✅ Gestión segura de archivos
-- ✅ Sin almacenamiento de contraseñas
-- ✅ Compatible con Windows Defender
-
-## 📄 Licencia
-
-Este proyecto está bajo **Apache License 2.0** - ver archivo [LICENSE](LICENSE) para detalles.
-
-### Resumen
-Eres libre de:
-- ✅ Usar comercialmente
-- ✅ Modificar el código
-- ✅ Distribuir cambios
-- ✅ Usar en privado
-
-Condiciones:
-- ⚠️ Incluye aviso de licencia
-- ⚠️ Incluye cambios importantes realizados
-
-## 👤 Autor
-
-**Synyster Rick**
-- © 2026 Todos los Derechos Reservados
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-1. Fork el proyecto
-2. Crea una rama para tu característica (`git checkout -b feature/amazing-feature`)
-3. Commit tus cambios (`git commit -m 'Add amazing feature'`)
-4. Push a la rama (`git push origin feature/amazing-feature`)
-5. Abre un Pull Request
-
-## 📞 Soporte
-
-Para reportar bugs, solicitar características o preguntas:
-- Abre un [Issue](https://github.com/YOUR_USERNAME/earnapp-reviewer/issues)
-- Incluye: Sistema operativo, versión Python, pasos para reproducir
-
-## 🙏 Créditos
-
-- [Playwright](https://playwright.dev/) - Web automation
-- [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) - GUI framework
-- [qasync](https://github.com/CogentApps/qasync) - Async/Qt integration
-
----
-
-**Última actualización:** 2026-03-05  
-**Versión:** 1.5.4
+Este proyecto se distribuye bajo la `Apache License 2.0`. El texto completo está disponible en [LICENSE](LICENSE).

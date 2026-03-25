@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-Build script for EarnApp Reviewer - Compiles to standalone .exe
-Uses PyInstaller to create a Windows executable in the same directory as main.py
+Build script for EarnApp Reviewer.
+
+Responsabilidades:
+- validar dependencias mínimas de build
+- detectar el icono `.ico` en la raíz del proyecto
+- compilar el ejecutable GUI sin consola con PyInstaller
+- dejar `EarnApp-Reviewer.exe` junto a los `.py`
 
 Usage:
     python build.py
 
 Requirements:
-    pip install pyinstaller
+    pip install -r requirements-build.txt
 """
 
 import os
@@ -46,7 +51,7 @@ def _validate_build_environment() -> bool:
 
     if missing:
         unique_missing = sorted(set(missing))
-        print("\n❌ Entorno incompleto para compilar.")
+        print("\n[ERROR] Entorno incompleto para compilar.")
         print(f"   Faltan paquetes: {', '.join(unique_missing)}")
         print("   Ejecuta: python -m pip install -r requirements.txt")
         return False
@@ -54,9 +59,10 @@ def _validate_build_environment() -> bool:
     return True
 
 def main():
-    """Build the executable"""
+    """Build the executable."""
     
-    # Change to project directory
+    # Todo el build se ejecuta relativo a la raíz del proyecto para que las
+    # rutas sean idénticas en local y en CI.
     project_dir = Path(__file__).parent
     os.chdir(project_dir)
     
@@ -73,20 +79,20 @@ def main():
     
     # Check if main.py exists
     if not Path(main_py).exists():
-        print(f"❌ Error: {main_py} not found!")
+        print(f"[ERROR] {main_py} not found!")
         return 1
     
-    print(f"✓ Found: {main_py}")
+    print(f"[OK] Found: {main_py}")
     
     # Check if icon exists
     if icon_file:
-        print(f"✓ Found icon: {icon_file.name}")
+        print(f"[OK] Found icon: {icon_file.name}")
     else:
-        print("⚠️  Warning: No .ico file found in project root")
+        print("[WARN] No .ico file found in project root")
         print("   Building without custom icon...")
     
-    # Clean old builds
-    print("\n📦 Cleaning old builds...")
+    # Limpiar artefactos previos evita mezclar binarios y specs viejos.
+    print("\n[STEP] Cleaning old builds...")
     build_dir = Path('build')
     dist_dir = Path('dist')
     spec_file = Path('main.spec')
@@ -98,17 +104,19 @@ def main():
             try:
                 if path.is_dir():
                     shutil.rmtree(path)
-                    print(f"  ✓ Removed {path.name}")
+                    print(f"  [OK] Removed {path.name}")
                 else:
                     path.unlink()
-                    print(f"  ✓ Removed {path.name}")
+                    print(f"  [OK] Removed {path.name}")
             except Exception as e:
-                print(f"  ⚠️  Could not remove {path.name}: {e}")
+                print(f"  [WARN] Could not remove {path.name}: {e}")
     
-    # Build PyInstaller command
-    print("\n🔨 Building executable...")
+    # PyInstaller genera un binario GUI (`--windowed`) en la raíz (`--distpath=.`).
+    print("\n[STEP] Building executable...")
     cmd = [
-        "pyinstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         "--noconfirm",
         "--onefile",
         "--windowed",
@@ -118,6 +126,9 @@ def main():
         "--workpath=build/work",
         "--hidden-import=qasync",
         "--collect-all=qasync",
+        "--exclude-module=PySide6",
+        "--exclude-module=PyQt5",
+        "--exclude-module=PySide2",
     ]
     
     # Add icon if exists
@@ -127,30 +138,30 @@ def main():
     # Add main.py at the end
     cmd.append(main_py)
     
-    print(f"📝 Command: {' '.join(cmd)}\n")
+    print(f"[CMD] {' '.join(str(part) for part in cmd)}\n")
     
     try:
         result = subprocess.run(cmd, check=True)
-        print("\n✅ Build completed successfully!")
+        print("\n[OK] Build completed successfully!")
         
         # Check if exe was created
         exe_file = Path('EarnApp-Reviewer.exe')
         if exe_file.exists():
             size_mb = exe_file.stat().st_size / (1024 * 1024)
-            print(f"\n📦 Executable created:")
+            print(f"\n[OK] Executable created:")
             print(f"   Location: {exe_file.resolve()}")
             print(f"   Size: {size_mb:.2f} MB")
             return 0
         else:
-            print(f"\n⚠️  Warning: Expected {exe_file} not found")
+            print(f"\n[WARN] Expected {exe_file} not found")
             return 1
             
     except subprocess.CalledProcessError as e:
-        print(f"\n❌ Build failed with error code {e.returncode}")
+        print(f"\n[ERROR] Build failed with error code {e.returncode}")
         print(f"   Make sure PyInstaller is installed: pip install pyinstaller")
         return 1
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        print(f"\n[ERROR] Unexpected error: {e}")
         return 1
 
 if __name__ == '__main__':

@@ -1,6 +1,14 @@
 """
-EarnApp Reviewer - Backend Module
-Handles web automation, URL scanning, and keyword detection.
+EarnApp Reviewer - Backend Module.
+
+Este módulo concentra toda la lógica que toca red:
+- gestión del runtime de Playwright
+- restauración y persistencia de sesión
+- escaneo de URLs
+- guardado/carga de estado del scanner
+
+La GUI delega aquí todo lo relacionado con navegador y automatización
+para mantener la capa visual simple y desacoplada.
 
 Author: Synyster Rick
 License: Apache License 2.0
@@ -39,15 +47,17 @@ class ScannerBackend:
         self.browser: Optional[Browser] = None
         self.context = None
         
-        # Statistics
+        # Estadísticas del escaneo actual. La GUI las lee para actualizar
+        # el panel superior en tiempo real.
         self.stats = {
             'pending': 0,
             'processed': 0,
             'removed': 0,
             'current_url': '-'
         }
-        
-        # Runtime directories
+
+        # Rutas de runtime que deben funcionar tanto desde código fuente
+        # como desde el ejecutable empaquetado con PyInstaller.
         self.base_dir = self._get_app_dir()
         self.runtime_dir = self.base_dir / 'runtime'
         self.profile_dir = self.runtime_dir / 'browser_profile'
@@ -70,29 +80,122 @@ class ScannerBackend:
         self.profile_dir.mkdir(exist_ok=True)
         self.playwright_browsers_dir.mkdir(exist_ok=True)
 
-    async def _restore_auth_state(self, context):
-        """Restore cookie state when available as a backup to persistent profile."""
+    def _load_auth_state_data(self) -> Optional[Dict[str, Any]]:
+        """
+        Load the serialized Playwright auth snapshot from disk.
+
+        Returns:
+            Parsed JSON payload or None when no snapshot exists.
+        """
         if not self.auth_state_file.exists():
+            return None
+
+        with open(self.auth_state_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    async def _restore_storage_origins(self, context, origins: List[Dict[str, Any]]):
+        """
+        Restore localStorage entries saved by Playwright storage_state().
+
+        Playwright's `storage_state(path=...)` serializes cookies and also
+        localStorage by origin. When the persistent profile is stale or was
+        regenerated, restoring only cookies is not enough for sites that also
+        rely on client-side storage.
+        """
+        if not origins:
             return
 
+        helper_page = await context.new_page()
         try:
-            with open(self.auth_state_file, 'r', encoding='utf-8') as f:
-                state_data = json.load(f)
+            for origin_data in origins:
+                origin = (origin_data.get('origin') or '').strip()
+                local_storage_entries = origin_data.get('localStorage') or []
+                if not origin or not local_storage_entries:
+                    continue
+
+                try:
+                    await helper_page.goto(origin, wait_until='domcontentloaded', timeout=15000)
+                    await helper_page.evaluate(
+                        """
+                        entries => {
+                            for (const entry of entries) {
+                                localStorage.setItem(entry.name, entry.value);
+                            }
+                        }
+                        """,
+                        local_storage_entries,
+                    )
+                except Exception as storage_error:
+                    self.log(
+                        f"No se pudo restaurar localStorage para {origin}: {str(storage_error)}",
+                        'WARNING'
+                    )
+        finally:
+            try:
+                await helper_page.close()
+            except Exception:
+                pass
+
+    async def _restore_auth_state(self, context):
+        """
+        Restore cookie/localStorage state as a fallback to the persistent profile.
+
+        El perfil persistente es el mecanismo principal. `auth_state.json`
+        funciona como respaldo cuando Chromium recrea el perfil, cambia el
+        canal de navegador o la app estuvo inactiva por mucho tiempo.
+        """
+        try:
+            state_data = self._load_auth_state_data()
+            if not state_data:
+                return
 
             cookies = state_data.get('cookies', [])
             if cookies:
                 await context.add_cookies(cookies)
-                self.log(f"Estado de autenticación restaurado ({len(cookies)} cookies)")
+
+            origins = state_data.get('origins', [])
+            if origins:
+                await self._restore_storage_origins(context, origins)
+
+            if cookies or origins:
+                self.log(
+                    f"Estado de autenticación restaurado ({len(cookies)} cookies, "
+                    f"{len(origins)} origins)"
+                )
         except Exception as e:
             self.log(f"No se pudo restaurar auth_state.json: {str(e)}", 'WARNING')
 
-    async def _persist_auth_state(self, context):
-        """Persist cookie/localStorage state to survive long inactivity periods."""
+    async def _persist_auth_state(
+        self,
+        context,
+        *,
+        reason: str,
+        log_success: bool = False,
+        log_closed_warning: bool = False,
+    ) -> bool:
+        """
+        Persist cookie/localStorage state while the context is still alive.
+
+        Returns:
+            True when the snapshot could be written successfully.
+        """
         try:
-            await context.storage_state(path=str(self.auth_state_file))
-            self.log("Estado de autenticación guardado en runtime/auth_state.json")
+            state_data = await context.storage_state()
+            with open(self.auth_state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, indent=2, ensure_ascii=False)
+                f.write('\n')
+
+            if log_success:
+                self.log(
+                    f"Estado de autenticación guardado en runtime/auth_state.json [{reason}]"
+                )
+            return True
         except Exception as e:
-            self.log(f"No se pudo guardar auth_state.json: {str(e)}", 'WARNING')
+            error_text = str(e).lower()
+            is_closed_error = 'has been closed' in error_text or 'browser has been closed' in error_text
+            if not is_closed_error or log_closed_warning:
+                self.log(f"No se pudo guardar auth_state.json [{reason}]: {str(e)}", 'WARNING')
+            return False
 
     def _has_local_chromium(self) -> bool:
         """Check if local Playwright Chromium is already present."""
@@ -253,7 +356,13 @@ class ScannerBackend:
             return fallback_context
 
     async def get_live_url_preview(self, url: str, width: int = 900, height: int = 620) -> Dict[str, Any]:
-        """Load URL with Playwright and return text preview + screenshot bytes."""
+        """
+        Load URL with Playwright and return text preview + screenshot bytes.
+
+        El preview usa el mismo perfil persistente del escaneo para que el
+        contenido visual y el estado de login coincidan con lo que verá el
+        navegador real de la app.
+        """
         normalized_url = url.strip()
         if not normalized_url:
             return {
@@ -322,15 +431,28 @@ class ScannerBackend:
         finally:
             try:
                 if context:
-                    await self._persist_auth_state(context)
+                    await self._persist_auth_state(
+                        context,
+                        reason='preview',
+                        log_success=False,
+                        log_closed_warning=False,
+                    )
                     await context.close()
             except Exception:
                 pass
 
     async def run_interactive_auth_session(self, start_url: str, timeout_seconds: int = 180) -> bool:
-        """Open a visible browser with persistent profile for manual login/authentication."""
+        """
+        Open a visible browser with persistent profile for manual authentication.
+
+        La sesión se va guardando mientras el navegador sigue abierto. Eso evita
+        el fallo donde el usuario cerraba la ventana y luego Playwright ya no
+        permitía leer `storage_state()` porque el contexto estaba destruido.
+        """
         target_url = start_url.strip() if start_url else "https://earnapp.com/dashboard"
         context = None
+        auth_state_saved = False
+        last_snapshot_at = 0.0
 
         try:
             self.ensure_playwright_browser()
@@ -353,6 +475,19 @@ class ScannerBackend:
 
                 started_at = time.monotonic()
                 while time.monotonic() - started_at < timeout_seconds:
+                    # Guardar periódicamente mientras el navegador sigue vivo.
+                    # Así la sesión queda persistida incluso si el usuario cierra
+                    # la ventana antes de que podamos hacer un guardado final.
+                    if time.monotonic() - last_snapshot_at >= 2.0:
+                        snapshot_ok = await self._persist_auth_state(
+                            context,
+                            reason='interactive-auth',
+                            log_success=False,
+                            log_closed_warning=False,
+                        )
+                        auth_state_saved = auth_state_saved or snapshot_ok
+                        last_snapshot_at = time.monotonic()
+
                     # Si el usuario cierra todas las ventanas, la sesión se considera completada.
                     if len(context.pages) == 0:
                         break
@@ -360,8 +495,25 @@ class ScannerBackend:
 
                 if len(context.pages) > 0:
                     self.log("Tiempo de autenticación agotado; cerrando sesión interactiva", 'WARNING')
+                else:
+                    self.log("Ventana de autenticación cerrada por el usuario", 'INFO')
 
-                await self._persist_auth_state(context)
+                final_snapshot_ok = await self._persist_auth_state(
+                    context,
+                    reason='interactive-auth-final',
+                    log_success=False,
+                    log_closed_warning=False,
+                )
+                auth_state_saved = auth_state_saved or final_snapshot_ok
+
+                if auth_state_saved:
+                    self.log("Estado de autenticación actualizado correctamente", 'INFO')
+                else:
+                    self.log(
+                        "No se pudo confirmar el guardado final de la sesión. "
+                        "Vuelve a iniciar sesión si el preview sigue redirigiendo a Sign In.",
+                        'WARNING'
+                    )
 
                 return True
 
@@ -386,7 +538,8 @@ class ScannerBackend:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         log_message = f"[{timestamp}] [{level}] {message}"
         
-        # Write to log file
+        # Persistimos también en disco para troubleshooting post-mortem,
+        # incluso cuando la app corre como `.exe`.
         log_file = self.base_dir / 'log.txt'
         try:
             with open(log_file, 'a', encoding='utf-8') as f:
@@ -394,7 +547,8 @@ class ScannerBackend:
         except Exception as e:
             print(f"Error writing to log file: {e}")
         
-        # Call callback if provided
+        # La GUI se actualiza a través del callback sin acoplar el backend
+        # a widgets concretos de Qt.
         if self.log_callback:
             self.log_callback(log_message)
     
@@ -600,7 +754,8 @@ class ScannerBackend:
                 
                 page = await self.context.new_page()
                 
-                # Process URLs in a circular queue until user stops or queue is empty
+                # Cola circular: si no hay match la URL vuelve al final lógico
+                # del recorrido; si hay match se elimina de la cola.
                 while remaining_urls and not self.stop_requested:
                     if current_index >= len(remaining_urls):
                         current_index = 0
@@ -630,7 +785,8 @@ class ScannerBackend:
                     
                     self.stats['processed'] += 1
                     
-                    # Save state periodically
+                    # Guardado periódico para recuperar cola y estadísticas
+                    # después de cierres o reinicios.
                     if self.stats['processed'] % 5 == 0:
                         self.save_state(remaining_urls, keywords, current_index)
                     
@@ -643,7 +799,12 @@ class ScannerBackend:
                             remaining_delay -= sleep_chunk
                 
                 await page.close()
-                await self._persist_auth_state(self.context)
+                await self._persist_auth_state(
+                    self.context,
+                    reason='scan',
+                    log_success=False,
+                    log_closed_warning=False,
+                )
                 await self.context.close()
                 self.context = None
                 self.browser = None
