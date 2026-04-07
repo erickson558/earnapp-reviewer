@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -46,6 +47,7 @@ class ScannerBackend:
         self.stop_requested = False
         self.browser: Optional[Browser] = None
         self.context = None
+        self.app_name = 'EarnAppReviewer'
         
         # Estadísticas del escaneo actual. La GUI las lee para actualizar
         # el panel superior en tiempo real.
@@ -59,13 +61,15 @@ class ScannerBackend:
         # Rutas de runtime que deben funcionar tanto desde código fuente
         # como desde el ejecutable empaquetado con PyInstaller.
         self.base_dir = self._get_app_dir()
-        self.runtime_dir = self.base_dir / 'runtime'
+        self.legacy_runtime_dir = self.base_dir / 'runtime'
+        self.runtime_dir = self._get_runtime_dir()
         self.profile_dir = self.runtime_dir / 'browser_profile'
+        self.legacy_profile_dir = self.legacy_runtime_dir / 'browser_profile'
         # Nueva ubicación preferida: junto al proyecto/.exe para que el
         # navegador quede autocontenido y fácil de inspeccionar.
         self.playwright_browsers_dir = self.base_dir / 'ms-playwright'
         # Compatibilidad con instalaciones anteriores.
-        self.legacy_playwright_browsers_dir = self.runtime_dir / 'playwright-browsers'
+        self.legacy_playwright_browsers_dir = self.legacy_runtime_dir / 'playwright-browsers'
         self.state_file = self.runtime_dir / 'scanner_state.json'
         self.auth_state_file = self.runtime_dir / 'auth_state.json'
         self._playwright_install_attempted = False
@@ -78,10 +82,85 @@ class ScannerBackend:
         if getattr(sys, 'frozen', False):
             return Path(sys.executable).resolve().parent
         return Path(__file__).resolve().parent
+
+    def _get_runtime_dir(self) -> Path:
+        """
+        Return the runtime directory outside the synced project folder.
+
+        Chromium writes cache, sqlite journals, crash dumps and other volatile
+        files constantly. Keeping that profile inside OneDrive creates a large
+        amount of sync churn, so runtime state now lives in the user-local app
+        data directory while the executable and sources stay in the project.
+        """
+        local_app_data = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+        if sys.platform == 'win32' and local_app_data:
+            return Path(local_app_data) / self.app_name / 'runtime'
+
+        if sys.platform == 'darwin':
+            return Path.home() / 'Library' / 'Application Support' / self.app_name / 'runtime'
+
+        xdg_state_home = os.environ.get('XDG_STATE_HOME')
+        if xdg_state_home:
+            return Path(xdg_state_home) / self.app_name / 'runtime'
+
+        return Path.home() / '.local' / 'state' / self.app_name / 'runtime'
+
+    def _migrate_legacy_runtime(self):
+        """
+        Move previously generated runtime assets out of the project folder.
+
+        The migration is intentionally conservative: it only moves files that
+        do not exist yet in the new location, so an already healthy runtime in
+        LocalAppData is never overwritten by stale project-local copies.
+        """
+        if self.runtime_dir == self.legacy_runtime_dir or not self.legacy_runtime_dir.exists():
+            return
+
+        migrations = [
+            (self.legacy_profile_dir, self.profile_dir),
+            (self.legacy_runtime_dir / 'auth_state.json', self.auth_state_file),
+            (self.legacy_runtime_dir / 'scanner_state.json', self.state_file),
+        ]
+
+        moved_items: List[str] = []
+        for source, target in migrations:
+            if not source.exists() or target.exists():
+                continue
+
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(target))
+                moved_items.append(source.name)
+            except Exception as migration_error:
+                self.log(
+                    f"No se pudo migrar {source} hacia runtime local: {str(migration_error)}",
+                    'WARNING'
+                )
+
+        for backup_dir in sorted(self.legacy_runtime_dir.glob('browser_profile_backup_*')):
+            target_backup_dir = self.runtime_dir / backup_dir.name
+            if target_backup_dir.exists():
+                continue
+
+            try:
+                shutil.move(str(backup_dir), str(target_backup_dir))
+                moved_items.append(backup_dir.name)
+            except Exception as migration_error:
+                self.log(
+                    f"No se pudo migrar respaldo {backup_dir} hacia runtime local: {str(migration_error)}",
+                    'WARNING'
+                )
+
+        if moved_items:
+            self.log(
+                "Runtime legado migrado a almacenamiento local del usuario: "
+                + ", ".join(moved_items)
+            )
     
     def _ensure_directories(self):
         """Ensure runtime directories exist."""
-        self.runtime_dir.mkdir(exist_ok=True)
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self._migrate_legacy_runtime()
         self.profile_dir.mkdir(exist_ok=True)
         self.playwright_browsers_dir.mkdir(exist_ok=True)
 
@@ -298,7 +377,7 @@ class ScannerBackend:
 
             if log_success:
                 self.log(
-                    f"Estado de autenticación guardado en runtime/auth_state.json [{reason}]"
+                    f"Estado de autenticación guardado en {self.auth_state_file} [{reason}]"
                 )
             return True
         except Exception as e:
@@ -1042,6 +1121,12 @@ class ScannerBackend:
                     # después de cierres o reinicios.
                     if self.stats['processed'] % 5 == 0:
                         self.save_state(remaining_urls, keywords, current_index)
+                        await self._persist_auth_state(
+                            self.context,
+                            reason='scan-periodic',
+                            log_success=False,
+                            log_closed_warning=False,
+                        )
                     
                     # Delay before next URL
                     if remaining_urls and not self.stop_requested:

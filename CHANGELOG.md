@@ -5,6 +5,16 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [V1.6.3] - 2026-04-07
+
+### 🐛 Fixed
+- El perfil persistente de Chromium ya no vive dentro del proyecto, evitando la tormenta de archivos en `runtime/` cuando la carpeta está sincronizada por OneDrive
+- El escaneo ahora guarda snapshots periódicos de autenticación además del estado de cola, reduciendo pérdida de sesión tras reinicios o recreación de perfil
+
+### 🛠️ Improved
+- Migración automática de `browser_profile`, `auth_state.json`, `scanner_state.json` y respaldos legacy desde `runtime/` hacia almacenamiento local del usuario
+- Documentación actualizada para reflejar la nueva ubicación de runtime y la versión actual
+
 ## [V1.6.0] - 2026-03-25
 
 ### 🐛 Fixed

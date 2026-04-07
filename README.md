@@ -3,7 +3,7 @@
 Aplicación de escritorio en Python para recorrer URLs de EarnApp con un navegador real, detectar coincidencias por palabras clave y eliminar automáticamente los enlaces encontrados de la cola de trabajo.
 
 Repositorio: `https://github.com/erickson558/earnapp-reviewer`
-Versión actual: `V1.6.0`
+Versión actual: `V1.6.3`
 Licencia: `Apache License 2.0`
 
 ## Descripción
@@ -21,7 +21,7 @@ El proyecto combina `PyQt6`, `qasync` y `Playwright` para ofrecer una GUI que:
 
 - Escaneo circular continuo hasta detener manualmente el proceso.
 - Preview visual y textual de la URL activa usando el mismo contexto de navegador.
-- Persistencia de sesión en `runtime/browser_profile` y respaldo en `runtime/auth_state.json`.
+- Persistencia de sesión en perfil Chromium local del usuario y respaldo en `auth_state.json` para rehidratar cookies/localStorage.
 - Inicio de sesión asistido desde la GUI con refresco automático del preview.
 - Sincronización de la cola restante con el textfield de preview.
 - Guardado y carga de estado en `runtime/scanner_state.json`.
@@ -89,7 +89,7 @@ earnappreviewer/
 ├── build.py
 ├── config.json
 ├── VERSION
-├── runtime/
+├── runtime/                  # legacy; la app migra a almacenamiento local del usuario
 │   ├── auth_state.json
 │   ├── browser_profile/
 │   └── scanner_state.json
@@ -114,9 +114,12 @@ Campos relevantes:
 
 Archivos de runtime:
 
-- `runtime/browser_profile`: perfil persistente de Playwright
-- `runtime/auth_state.json`: snapshot adicional de cookies/localStorage
-- `runtime/scanner_state.json`: cola restante y estadísticas del escaneo
+- Windows: `%LOCALAPPDATA%\EarnAppReviewer\runtime`
+- Linux: `~/.local/state/EarnAppReviewer/runtime`
+- macOS: `~/Library/Application Support/EarnAppReviewer/runtime`
+- `browser_profile`: perfil persistente de Playwright fuera de OneDrive
+- `auth_state.json`: snapshot adicional de cookies/localStorage
+- `scanner_state.json`: cola restante y estadísticas del escaneo
 - `log.txt`: historial técnico de ejecución
 
 ## Compilación
@@ -178,6 +181,7 @@ El workflow [release.yml](.github/workflows/release.yml) hace lo siguiente en ca
 ## Troubleshooting
 
 - Si el preview redirige a `Sign In`, abre `Iniciar sesión`, completa el login y cierra esa ventana para que el snapshot se vuelva a guardar.
+- Si venías de una versión anterior, el primer arranque migra automáticamente la sesión y el perfil desde `runtime/` hacia almacenamiento local del usuario.
 - Si Playwright no encuentra Chromium local, la app intentará usar `Chrome` o `Microsoft Edge`.
 - Si necesitas revisar errores, consulta `log.txt`.
 - Si el build falla por herramientas faltantes, instala `python -m pip install -r requirements-build.txt`.
