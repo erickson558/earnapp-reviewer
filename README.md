@@ -3,7 +3,7 @@
 Aplicación de escritorio en Python para recorrer URLs de EarnApp con un navegador real, detectar coincidencias por palabras clave y eliminar automáticamente los enlaces encontrados de la cola de trabajo.
 
 Repositorio: `https://github.com/erickson558/earnapp-reviewer`
-Versión actual: `V1.6.3`
+Versión actual: `V1.6.4`
 Licencia: `Apache License 2.0`
 
 ## Descripción

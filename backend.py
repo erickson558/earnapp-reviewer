@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright, Browser, Page, TimeoutError as PlaywrightTimeout
+from playwright.async_api import async_playwright, Browser, Page, TimeoutError as PlaywrightTimeout, Playwright
 
 
 class ScannerBackend:
@@ -45,6 +45,9 @@ class ScannerBackend:
         self.log_callback = log_callback
         self.is_running = False
         self.stop_requested = False
+        # Instancia única de Playwright reutilizada para evitar múltiples Chrome
+        self._playwright: Optional[Playwright] = None
+        self._playwright_lock = asyncio.Lock()
         self.browser: Optional[Browser] = None
         self.context = None
         self.app_name = 'EarnAppReviewer'
@@ -679,6 +682,30 @@ class ScannerBackend:
 
             return fallback_browser
 
+    async def _ensure_playwright_instance(self) -> Playwright:
+        """
+        Garantiza que hay una única instancia de Playwright reutilizable.
+        
+        Esta función centraliza la gestión de Playwright para evitar múltiples
+        instancias que crean procesos Chrome separados.
+        """
+        async with self._playwright_lock:
+            if self._playwright is None:
+                # Crear instancia única de Playwright
+                self._playwright = await async_playwright().start()
+                self.log("Instancia única de Playwright iniciada")
+            return self._playwright
+    
+    async def _cleanup_playwright_instance(self):
+        """
+        Limpia la instancia de Playwright al cerrar la aplicación.
+        """
+        async with self._playwright_lock:
+            if self._playwright is not None:
+                await self._playwright.stop()
+                self._playwright = None
+                self.log("Instancia de Playwright cerrada")
+
     async def get_live_url_preview(self, url: str, width: int = 900, height: int = 620) -> Dict[str, Any]:
         """
         Load URL with Playwright and return text preview + screenshot bytes.
@@ -703,43 +730,44 @@ class ScannerBackend:
         try:
             self.ensure_playwright_browser()
             self._set_playwright_browsers_env()
+            
+            # Usar instancia única de Playwright para evitar múltiples Chrome
+            p = await self._ensure_playwright_instance()
+            browser = await self._launch_browser(p, headless=True)
+            context = await browser.new_context(
+                viewport={'width': width, 'height': height}
+            )
+            await self._restore_auth_state(context)
+            
+            await context.set_extra_http_headers({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            page = await context.new_page()
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+            )
 
-            async with async_playwright() as p:
-                browser = await self._launch_browser(p, headless=True)
-                context = await browser.new_context(
-                    viewport={'width': width, 'height': height}
-                )
-                await self._restore_auth_state(context)
+            response = await page.goto(normalized_url, wait_until='networkidle', timeout=30000)
+            await asyncio.sleep(1.0)
 
-                await context.set_extra_http_headers({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                })
-                page = await context.new_page()
-                await page.add_init_script(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-                )
+            final_url = page.url
+            title = await page.title()
+            if not title:
+                title = 'Sin título'
 
-                response = await page.goto(normalized_url, wait_until='networkidle', timeout=30000)
-                await asyncio.sleep(1.0)
+            body_text = await page.text_content('body')
+            body_text = re.sub(r'\s+', ' ', (body_text or '')).strip()
+            snippet = body_text[:800] + ('...' if len(body_text) > 800 else '')
+            if not snippet:
+                snippet = 'No se pudo extraer contenido legible de la página.'
 
-                final_url = page.url
-                title = await page.title()
-                if not title:
-                    title = 'Sin título'
+            status_code = response.status if response else 'N/A'
+            screenshot_bytes = await page.screenshot(type='png', full_page=False)
 
-                body_text = await page.text_content('body')
-                body_text = re.sub(r'\s+', ' ', (body_text or '')).strip()
-                snippet = body_text[:800] + ('...' if len(body_text) > 800 else '')
-                if not snippet:
-                    snippet = 'No se pudo extraer contenido legible de la página.'
-
-                status_code = response.status if response else 'N/A'
-                screenshot_bytes = await page.screenshot(type='png', full_page=False)
-
-                return {
-                    'url': normalized_url,
-                    'final_url': final_url,
-                    'status': f"OK ({status_code})",
+            return {
+                'url': normalized_url,
+                'final_url': final_url,
+                'status': f"OK ({status_code})",
                     'title': title,
                     'snippet': snippet,
                     'screenshot': screenshot_bytes
@@ -789,13 +817,14 @@ class ScannerBackend:
         try:
             self.ensure_playwright_browser()
             self._set_playwright_browsers_env()
-
-            async with async_playwright() as p:
-                context = await self._launch_persistent_context(p, headless=False, width=1280, height=800)
-                await self._restore_auth_state(context)
-                await context.set_extra_http_headers({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                })
+            
+            # Usar instancia única de Playwright para evitar múltiples Chrome
+            p = await self._ensure_playwright_instance()
+            context = await self._launch_persistent_context(p, headless=False, width=1280, height=800)
+            await self._restore_auth_state(context)
+            await context.set_extra_http_headers({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
 
                 page = context.pages[0] if context.pages else await context.new_page()
                 await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
@@ -1071,15 +1100,16 @@ class ScannerBackend:
         try:
             self.ensure_playwright_browser()
             self._set_playwright_browsers_env()
-
-            async with async_playwright() as p:
-                self.context = await self._launch_persistent_context(
-                    p,
-                    headless=headless,
-                    width=1280,
-                    height=720
-                )
-                await self._restore_auth_state(self.context)
+            
+            # Usar instancia única de Playwright para evitar múltiples Chrome
+            p = await self._ensure_playwright_instance()
+            self.context = await self._launch_persistent_context(
+                p,
+                headless=headless,
+                width=1280,
+                height=720
+            )
+            await self._restore_auth_state(self.context)
                 await self.context.set_extra_http_headers({
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
@@ -1187,3 +1217,27 @@ class ScannerBackend:
             pass
         finally:
             self.context = None
+            
+    async def cleanup_resources(self):
+        """
+        Limpia todos los recursos del backend al cerrar la aplicación.
+        
+        Esta función debe llamarse al cerrar la GUI para evitar procesos
+        Chrome huérfanos y liberar memoria correctamente.
+        """
+        try:
+            # Detener escaneo si está corriendo
+            if self.is_running:
+                self.stop_requested = True
+                if self.context:
+                    try:
+                        await self.context.close()
+                    except Exception:
+                        pass
+                    
+            # Cerrar instancia de Playwright
+            await self._cleanup_playwright_instance()
+            self.log("Recursos del backend liberados correctamente")
+            
+        except Exception as e:
+            self.log(f"Error liberando recursos: {str(e)}", 'WARNING')

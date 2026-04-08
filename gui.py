@@ -146,6 +146,8 @@ class MainWindow(QMainWindow):
         self._pending_preview_url: Optional[str] = None
         self._last_preview_url = ""
         self._last_runtime_preview_url = ""
+        # Control de concurrencia para evitar múltiples previews simultáneos
+        self._preview_lock = asyncio.Lock()
         self.preview_debounce_timer = QTimer()
         self.preview_debounce_timer.setSingleShot(True)
         self.preview_debounce_timer.timeout.connect(self.preview_current_url)
@@ -622,43 +624,45 @@ class MainWindow(QMainWindow):
 
     async def _load_preview_async(self, url: str):
         """Load URL preview without blocking the UI."""
-        try:
-            preview = await self.backend.get_live_url_preview(url)
-            preview_text = (
-                f"URL: {preview.get('url', '')}\n"
-                f"Final: {preview.get('final_url', '')}\n"
-                f"Estado: {preview.get('status', '')}\n"
-                f"Título: {preview.get('title', '')}\n\n"
-                f"{preview.get('snippet', '')}"
-            )
-            self.preview_text.setPlainText(preview_text)
-
-            screenshot_bytes = preview.get('screenshot')
-
-            if screenshot_bytes:
-                pixmap = QPixmap()
-                pixmap.loadFromData(screenshot_bytes)
-
-                # Scale to fit label while maintaining aspect ratio
-                scaled_pixmap = pixmap.scaled(
-                    self.preview_image_label.width() - 10,
-                    self.preview_image_label.height() - 10,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
+        # Control de concurrencia: solo un preview a la vez para evitar múltiples Chrome
+        async with self._preview_lock:
+            try:
+                preview = await self.backend.get_live_url_preview(url)
+                preview_text = (
+                    f"URL: {preview.get('url', '')}\n"
+                    f"Final: {preview.get('final_url', '')}\n"
+                    f"Estado: {preview.get('status', '')}\n"
+                    f"Título: {preview.get('title', '')}\n\n"
+                    f"{preview.get('snippet', '')}"
                 )
-                self.preview_image_label.setPixmap(scaled_pixmap)
-            else:
-                self.preview_image_label.setText("No se pudo capturar la captura de pantalla")
-            
-            self.status_bar.showMessage("Preview actualizado")
-        except Exception as e:
-            self.preview_text.setPlainText(f"Error cargando preview: {str(e)}")
-            self.preview_image_label.setText("Error capturando imagen")
-            self.status_bar.showMessage("Error en preview")
-        finally:
-            self._preview_loading = False
-            if self._pending_preview_url and self._pending_preview_url != self._last_preview_url:
-                self.schedule_preview_refresh(120)
+                self.preview_text.setPlainText(preview_text)
+
+                screenshot_bytes = preview.get('screenshot')
+
+                if screenshot_bytes:
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(screenshot_bytes)
+
+                    # Scale to fit label while maintaining aspect ratio
+                    scaled_pixmap = pixmap.scaled(
+                        self.preview_image_label.width() - 10,
+                        self.preview_image_label.height() - 10,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self.preview_image_label.setPixmap(scaled_pixmap)
+                else:
+                    self.preview_image_label.setText("No se pudo capturar la captura de pantalla")
+                
+                self.status_bar.showMessage("Preview actualizado")
+            except Exception as e:
+                self.preview_text.setPlainText(f"Error cargando preview: {str(e)}")
+                self.preview_image_label.setText("Error capturando imagen")
+                self.status_bar.showMessage("Error en preview")
+            finally:
+                self._preview_loading = False
+                if self._pending_preview_url and self._pending_preview_url != self._last_preview_url:
+                    self.schedule_preview_refresh(120)
 
     def start_auth_session(self):
         """Open interactive browser session to login and persist auth state."""
@@ -867,6 +871,16 @@ class MainWindow(QMainWindow):
         
         # Save window position
         self.save_window_position()
+        
+        # Limpiar recursos del backend para evitar procesos Chrome huérfanos
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self.backend.cleanup_resources())
+            else:
+                loop.run_until_complete(self.backend.cleanup_resources())
+        except Exception as e:
+            print(f"Error limpiando recursos del backend: {e}")
         
         event.accept()
 
