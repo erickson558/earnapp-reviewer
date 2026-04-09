@@ -826,57 +826,57 @@ class ScannerBackend:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             })
 
-                page = context.pages[0] if context.pages else await context.new_page()
-                await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+            page = context.pages[0] if context.pages else await context.new_page()
+            await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
 
-                self.log(
-                    f"Sesión de autenticación abierta. Completa el login y cierra el navegador (timeout {timeout_seconds}s).",
-                    'INFO'
-                )
+            self.log(
+                f"Sesión de autenticación abierta. Completa el login y cierra el navegador (timeout {timeout_seconds}s).",
+                'INFO'
+            )
 
-                started_at = time.monotonic()
-                while time.monotonic() - started_at < timeout_seconds:
-                    # Guardar periódicamente mientras el navegador sigue vivo.
-                    # Así la sesión queda persistida incluso si el usuario cierra
-                    # la ventana antes de que podamos hacer un guardado final.
-                    if time.monotonic() - last_snapshot_at >= 2.0:
-                        snapshot_ok = await self._persist_auth_state(
-                            context,
-                            reason='interactive-auth',
-                            log_success=False,
-                            log_closed_warning=False,
-                        )
-                        auth_state_saved = auth_state_saved or snapshot_ok
-                        last_snapshot_at = time.monotonic()
-
-                    # Si el usuario cierra todas las ventanas, la sesión se considera completada.
-                    if len(context.pages) == 0:
-                        break
-                    await asyncio.sleep(1)
-
-                if len(context.pages) > 0:
-                    self.log("Tiempo de autenticación agotado; cerrando sesión interactiva", 'WARNING')
-                else:
-                    self.log("Ventana de autenticación cerrada por el usuario", 'INFO')
-
-                final_snapshot_ok = await self._persist_auth_state(
-                    context,
-                    reason='interactive-auth-final',
-                    log_success=False,
-                    log_closed_warning=False,
-                )
-                auth_state_saved = auth_state_saved or final_snapshot_ok
-
-                if auth_state_saved:
-                    self.log("Estado de autenticación actualizado correctamente", 'INFO')
-                else:
-                    self.log(
-                        "No se pudo confirmar el guardado final de la sesión. "
-                        "Vuelve a iniciar sesión si el preview sigue redirigiendo a Sign In.",
-                        'WARNING'
+            started_at = time.monotonic()
+            while time.monotonic() - started_at < timeout_seconds:
+                # Guardar periódicamente mientras el navegador sigue vivo.
+                # Así la sesión queda persistida incluso si el usuario cierra
+                # la ventana antes de que podamos hacer un guardado final.
+                if time.monotonic() - last_snapshot_at >= 2.0:
+                    snapshot_ok = await self._persist_auth_state(
+                        context,
+                        reason='interactive-auth',
+                        log_success=False,
+                        log_closed_warning=False,
                     )
+                    auth_state_saved = auth_state_saved or snapshot_ok
+                    last_snapshot_at = time.monotonic()
 
-                return True
+                # Si el usuario cierra todas las ventanas, la sesión se considera completada.
+                if len(context.pages) == 0:
+                    break
+                await asyncio.sleep(1)
+
+            if len(context.pages) > 0:
+                self.log("Tiempo de autenticación agotado; cerrando sesión interactiva", 'WARNING')
+            else:
+                self.log("Ventana de autenticación cerrada por el usuario", 'INFO')
+
+            final_snapshot_ok = await self._persist_auth_state(
+                context,
+                reason='interactive-auth-final',
+                log_success=False,
+                log_closed_warning=False,
+            )
+            auth_state_saved = auth_state_saved or final_snapshot_ok
+
+            if auth_state_saved:
+                self.log("Estado de autenticación actualizado correctamente", 'INFO')
+            else:
+                self.log(
+                    "No se pudo confirmar el guardado final de la sesión. "
+                    "Vuelve a iniciar sesión si el preview sigue redirigiendo a Sign In.",
+                    'WARNING'
+                )
+
+            return True
 
         except Exception as e:
             self.log(f"Error en sesión interactiva de autenticación: {str(e)}", 'ERROR')
@@ -1110,72 +1110,72 @@ class ScannerBackend:
                 height=720
             )
             await self._restore_auth_state(self.context)
-                await self.context.set_extra_http_headers({
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                })
-                
-                page = await self.context.new_page()
-                
-                # Cola circular: si no hay match la URL vuelve al final lógico
-                # del recorrido; si hay match se elimina de la cola.
-                while remaining_urls and not self.stop_requested:
+            await self.context.set_extra_http_headers({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+
+            page = await self.context.new_page()
+
+            # Cola circular: si no hay match la URL vuelve al final lógico
+            # del recorrido; si hay match se elimina de la cola.
+            while remaining_urls and not self.stop_requested:
+                if current_index >= len(remaining_urls):
+                    current_index = 0
+
+                url = remaining_urls[current_index]
+                self.stats['current_url'] = url
+                self.stats['pending'] = len(remaining_urls)
+
+                if progress_callback:
+                    progress_callback(self.stats)
+
+                # Scan URL
+                found = await self.scan_url(page, url, keywords, page_wait_ms)
+
+                if found:
+                    remaining_urls.pop(current_index)
+                    self.stats['removed'] += 1
+                    self.log(f"URL eliminada de la cola: {url}")
+
+                    if remaining_urls_callback:
+                        remaining_urls_callback(remaining_urls.copy())
+
                     if current_index >= len(remaining_urls):
                         current_index = 0
+                else:
+                    current_index = (current_index + 1) % len(remaining_urls)
 
-                    url = remaining_urls[current_index]
-                    self.stats['current_url'] = url
-                    self.stats['pending'] = len(remaining_urls)
-                    
-                    if progress_callback:
-                        progress_callback(self.stats)
-                    
-                    # Scan URL
-                    found = await self.scan_url(page, url, keywords, page_wait_ms)
-                    
-                    if found:
-                        remaining_urls.pop(current_index)
-                        self.stats['removed'] += 1
-                        self.log(f"URL eliminada de la cola: {url}")
+                self.stats['processed'] += 1
 
-                        if remaining_urls_callback:
-                            remaining_urls_callback(remaining_urls.copy())
+                # Guardado periódico para recuperar cola y estadísticas
+                # después de cierres o reinicios.
+                if self.stats['processed'] % 5 == 0:
+                    self.save_state(remaining_urls, keywords, current_index)
+                    await self._persist_auth_state(
+                        self.context,
+                        reason='scan-periodic',
+                        log_success=False,
+                        log_closed_warning=False,
+                    )
 
-                        if current_index >= len(remaining_urls):
-                            current_index = 0
-                    else:
-                        current_index = (current_index + 1) % len(remaining_urls)
-                    
-                    self.stats['processed'] += 1
-                    
-                    # Guardado periódico para recuperar cola y estadísticas
-                    # después de cierres o reinicios.
-                    if self.stats['processed'] % 5 == 0:
-                        self.save_state(remaining_urls, keywords, current_index)
-                        await self._persist_auth_state(
-                            self.context,
-                            reason='scan-periodic',
-                            log_success=False,
-                            log_closed_warning=False,
-                        )
-                    
-                    # Delay before next URL
-                    if remaining_urls and not self.stop_requested:
-                        remaining_delay = delay_ms / 1000.0
-                        while remaining_delay > 0 and not self.stop_requested:
-                            sleep_chunk = min(0.2, remaining_delay)
-                            await asyncio.sleep(sleep_chunk)
-                            remaining_delay -= sleep_chunk
-                
-                await page.close()
-                await self._persist_auth_state(
-                    self.context,
-                    reason='scan',
-                    log_success=False,
-                    log_closed_warning=False,
-                )
-                await self.context.close()
-                self.context = None
-                self.browser = None
+                # Delay before next URL
+                if remaining_urls and not self.stop_requested:
+                    remaining_delay = delay_ms / 1000.0
+                    while remaining_delay > 0 and not self.stop_requested:
+                        sleep_chunk = min(0.2, remaining_delay)
+                        await asyncio.sleep(sleep_chunk)
+                        remaining_delay -= sleep_chunk
+
+            await page.close()
+            await self._persist_auth_state(
+                self.context,
+                reason='scan',
+                log_success=False,
+                log_closed_warning=False,
+            )
+            await self.context.close()
+            self.context = None
+            self.browser = None
                 
         except Exception as e:
             self.log(f"Error durante el escaneo: {str(e)}", 'ERROR')

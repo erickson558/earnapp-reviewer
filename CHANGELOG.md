@@ -5,6 +5,16 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 El formato es basado en [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 y este proyecto usa [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [V1.6.5] - 2026-04-08
+
+### 🐛 Fixed
+- El backend ya no crea múltiples procesos Chromium al combinar preview, escaneo y autenticación; ahora reutiliza una sola instancia de Playwright
+- La limpieza de cierre libera explícitamente la instancia compartida de Playwright para evitar procesos huérfanos al salir de la GUI
+
+### 🛠️ Improved
+- Preview, escaneo y login siguen usando contextos aislados, pero sobre un runtime compartido con locks para reducir consumo de RAM
+- README actualizado para reflejar la versión publicada y el cambio de arquitectura del navegador
+
 ## [V1.6.3] - 2026-04-07
 
 ### 🐛 Fixed
