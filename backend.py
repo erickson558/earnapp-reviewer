@@ -784,14 +784,13 @@ class ScannerBackend:
                 'screenshot': None
             }
         finally:
+            # BUG FIX: El preview NO debe guardar auth_state.json.
+            # Si la sesión expira durante el preview, sobreescribiría cookies
+            # válidas con el estado de la página de login (vacío), borrando
+            # la autenticación activa. El preview es de solo lectura respecto
+            # al estado de autenticación.
             try:
                 if context:
-                    await self._persist_auth_state(
-                        context,
-                        reason='preview',
-                        log_success=False,
-                        log_closed_warning=False,
-                    )
                     await context.close()
             except Exception:
                 pass
@@ -805,9 +804,12 @@ class ScannerBackend:
         """
         Open a visible browser with persistent profile for manual authentication.
 
-        La sesión se va guardando mientras el navegador sigue abierto. Eso evita
-        el fallo donde el usuario cerraba la ventana y luego Playwright ya no
-        permitía leer `storage_state()` porque el contexto estaba destruido.
+        La sesión se guarda periódicamente cada 1s para capturar cookies justo
+        después del login sin esperar intervalos largos. Cuando se detecta que
+        el usuario cierra la última ventana (pages → 0), se intenta un guardado
+        inmediato antes de que el proceso del navegador muera por completo.
+        El bloque `finally` también intenta guardar antes de cerrar el contexto
+        como capa adicional de protección.
         """
         target_url = start_url.strip() if start_url else "https://earnapp.com/dashboard"
         context = None
@@ -817,7 +819,7 @@ class ScannerBackend:
         try:
             self.ensure_playwright_browser()
             self._set_playwright_browsers_env()
-            
+
             # Usar instancia única de Playwright para evitar múltiples Chrome
             p = await self._ensure_playwright_instance()
             context = await self._launch_persistent_context(p, headless=False, width=1280, height=800)
@@ -835,11 +837,37 @@ class ScannerBackend:
             )
 
             started_at = time.monotonic()
+            # Rastrear cambios en el conteo de páginas para detectar el cierre
+            # de la última ventana antes de que el contexto quede inválido.
+            prev_page_count = len(context.pages)
+
             while time.monotonic() - started_at < timeout_seconds:
-                # Guardar periódicamente mientras el navegador sigue vivo.
-                # Así la sesión queda persistida incluso si el usuario cierra
-                # la ventana antes de que podamos hacer un guardado final.
-                if time.monotonic() - last_snapshot_at >= 2.0:
+                current_page_count = len(context.pages)
+
+                # BUG FIX: Detectar el momento exacto en que la última página se
+                # cierra y guardar estado INMEDIATAMENTE, mientras el contexto
+                # de Playwright todavía puede responder a storage_state().
+                # Si esperamos al próximo ciclo, el proceso del navegador ya habrá
+                # muerto y storage_state() fallará silenciosamente.
+                if current_page_count == 0 and prev_page_count > 0:
+                    snapshot_ok = await self._persist_auth_state(
+                        context,
+                        reason='last-page-closing',
+                        log_success=True,
+                        log_closed_warning=False,
+                    )
+                    auth_state_saved = auth_state_saved or snapshot_ok
+                    break
+
+                # Salida si ya no hay páginas (entrada al loop con pages=0)
+                if current_page_count == 0:
+                    break
+
+                prev_page_count = current_page_count
+
+                # Guardado periódico cada 1s (reducido de 2s) para capturar
+                # cookies justo después del login sin una ventana ciega larga.
+                if time.monotonic() - last_snapshot_at >= 1.0:
                     snapshot_ok = await self._persist_auth_state(
                         context,
                         reason='interactive-auth',
@@ -849,29 +877,19 @@ class ScannerBackend:
                     auth_state_saved = auth_state_saved or snapshot_ok
                     last_snapshot_at = time.monotonic()
 
-                # Si el usuario cierra todas las ventanas, la sesión se considera completada.
-                if len(context.pages) == 0:
-                    break
-                await asyncio.sleep(1)
+                # Sleep corto (0.3s) para mayor sensibilidad al cierre del navegador
+                await asyncio.sleep(0.3)
 
             if len(context.pages) > 0:
                 self.log("Tiempo de autenticación agotado; cerrando sesión interactiva", 'WARNING')
             else:
                 self.log("Ventana de autenticación cerrada por el usuario", 'INFO')
 
-            final_snapshot_ok = await self._persist_auth_state(
-                context,
-                reason='interactive-auth-final',
-                log_success=False,
-                log_closed_warning=False,
-            )
-            auth_state_saved = auth_state_saved or final_snapshot_ok
-
             if auth_state_saved:
                 self.log("Estado de autenticación actualizado correctamente", 'INFO')
             else:
                 self.log(
-                    "No se pudo confirmar el guardado final de la sesión. "
+                    "No se pudo confirmar el guardado de la sesión. "
                     "Vuelve a iniciar sesión si el preview sigue redirigiendo a Sign In.",
                     'WARNING'
                 )
@@ -882,8 +900,17 @@ class ScannerBackend:
             self.log(f"Error en sesión interactiva de autenticación: {str(e)}", 'ERROR')
             return False
         finally:
+            # Intento final de guardar cookies antes de cerrar el contexto.
+            # Funciona solo si el proceso del navegador sigue vivo en este punto;
+            # si ya murió, _persist_auth_state falla silenciosamente sin dañar nada.
             try:
                 if context:
+                    await self._persist_auth_state(
+                        context,
+                        reason='interactive-auth-cleanup',
+                        log_success=False,
+                        log_closed_warning=False,
+                    )
                     await context.close()
             except Exception:
                 pass

@@ -670,13 +670,13 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("La sesión de autenticación ya está en curso")
             return
 
-        target_url = self.preview_url_input.text().strip()
-        if not target_url:
-            urls = self.backend.normalize_urls(self.urls_text.toPlainText())
-            if urls:
-                target_url = urls[0]
-        if not target_url:
-            target_url = "https://earnapp.com/dashboard"
+        # BUG FIX: Siempre abrir earnapp.com/dashboard para autenticación.
+        # Antes se usaba preview_url_input.text() que contiene una URL tipo
+        # sdk-node-xxx (link de dispositivo, no la página de login), por lo
+        # que el navegador abría la URL equivocada y el usuario no podía
+        # iniciar sesión. El dashboard de earnapp.com es siempre el destino
+        # correcto para el flujo de autenticación.
+        target_url = "https://earnapp.com/dashboard"
 
         if self.backend.is_running:
             self._auth_after_stop_requested = True
