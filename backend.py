@@ -768,10 +768,10 @@ class ScannerBackend:
                 'url': normalized_url,
                 'final_url': final_url,
                 'status': f"OK ({status_code})",
-                    'title': title,
-                    'snippet': snippet,
-                    'screenshot': screenshot_bytes
-                }
+                'title': title,
+                'snippet': snippet,
+                'screenshot': screenshot_bytes
+            }
 
         except Exception as e:
             self.log(f"Error cargando preview renderizado de {normalized_url}: {str(e)}", 'WARNING')
@@ -1202,7 +1202,6 @@ class ScannerBackend:
             )
             await self.context.close()
             self.context = None
-            self.browser = None
                 
         except Exception as e:
             self.log(f"Error durante el escaneo: {str(e)}", 'ERROR')

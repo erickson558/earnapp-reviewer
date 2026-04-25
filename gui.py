@@ -18,6 +18,7 @@ import asyncio
 import json
 import re
 import sys
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -28,10 +29,14 @@ from PyQt6.QtWidgets import (
     QGroupBox, QStatusBar, QMenuBar, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QPixmap
+from PyQt6.QtGui import QAction, QIcon, QFont, QKeySequence, QPixmap, QActionGroup
 
 from backend import ScannerBackend
 from versioning import DEFAULT_VERSION, read_version_file
+from i18n import Translator, AVAILABLE_LANGUAGES, DEFAULT_LANGUAGE
+
+# URL de donación "Cómprame una cerveza" vía PayPal.
+DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=ZABFRXC2P3JQN"
 
 
 class ConfigManager:
@@ -51,6 +56,7 @@ class ConfigManager:
         """
         default_config = {
             "version": self.app_version,
+            "language": "es",
             "window": {"width": 900, "height": 700, "x": 100, "y": 100},
             "auto_start": False,
             "auto_close_enabled": False,
@@ -126,6 +132,10 @@ class MainWindow(QMainWindow):
         if self.config_manager.get('version') != self.version:
             self.config_manager.set('version', self.version)
         
+        # Traductor i18n: lee idioma de config o usa el por defecto.
+        saved_lang = self.config_manager.get('language', DEFAULT_LANGUAGE)
+        self.tr = Translator(saved_lang)
+        
         # Backend desacoplado que encapsula Playwright y el escaneo.
         self.backend = ScannerBackend(log_callback=self.on_log_message)
         
@@ -178,8 +188,8 @@ class MainWindow(QMainWindow):
         return DEFAULT_VERSION
     
     def init_ui(self):
-        """Initialize user interface."""
-        self.setWindowTitle(f"EarnApp Reviewer {self.version}")
+        """Initialize user interface with i18n support."""
+        self.setWindowTitle(f"{self.tr.t('window_title')} {self.version}")
         
         # Set icon if available
         if self.icon_path.exists():
@@ -194,12 +204,12 @@ class MainWindow(QMainWindow):
         self.create_menu_bar()
         
         # Panel principal de control del proceso.
-        control_group = QGroupBox("Control Panel")
+        control_group = QGroupBox(self.tr.t("control_panel"))
         control_layout = QVBoxLayout()
         
         # Tiempos de espera configurables para navegación y ritmo del carrusel.
         delay_layout = QHBoxLayout()
-        delay_layout.addWidget(QLabel("Espera entre URLs (ms):"))
+        delay_layout.addWidget(QLabel(self.tr.t("delay_between_urls")))
         self.delay_spin = QSpinBox()
         self.delay_spin.setRange(1000, 300000)
         self.delay_spin.setSingleStep(500)
@@ -208,7 +218,7 @@ class MainWindow(QMainWindow):
         self.delay_spin.valueChanged.connect(lambda v: self.config_manager.set('delay_ms', v))
         delay_layout.addWidget(self.delay_spin)
         
-        delay_layout.addWidget(QLabel("Espera página (ms):"))
+        delay_layout.addWidget(QLabel(self.tr.t("page_wait")))
         self.page_wait_spin = QSpinBox()
         self.page_wait_spin.setRange(1000, 120000)
         self.page_wait_spin.setSingleStep(1000)
@@ -222,23 +232,23 @@ class MainWindow(QMainWindow):
         # Botones principales de operación.
         buttons_layout = QHBoxLayout()
         
-        self.start_btn = QPushButton("&Iniciar")
+        self.start_btn = QPushButton(self.tr.t("btn_start"))
         self.start_btn.setShortcut(QKeySequence("Ctrl+I"))
         self.start_btn.clicked.connect(self.start_scan)
         buttons_layout.addWidget(self.start_btn)
         
-        self.stop_btn = QPushButton("&Detener")
+        self.stop_btn = QPushButton(self.tr.t("btn_stop"))
         self.stop_btn.setShortcut(QKeySequence("Ctrl+D"))
         self.stop_btn.clicked.connect(self.stop_scan)
         self.stop_btn.setEnabled(False)
         buttons_layout.addWidget(self.stop_btn)
 
-        self.auth_btn = QPushButton("Iniciar &sesión")
+        self.auth_btn = QPushButton(self.tr.t("btn_login"))
         self.auth_btn.setShortcut(QKeySequence("Ctrl+S"))
         self.auth_btn.clicked.connect(self.start_auth_session)
         buttons_layout.addWidget(self.auth_btn)
         
-        self.exit_btn = QPushButton("&Salir")
+        self.exit_btn = QPushButton(self.tr.t("btn_exit"))
         self.exit_btn.setShortcut(QKeySequence("Ctrl+Q"))
         self.exit_btn.clicked.connect(self.close)
         buttons_layout.addWidget(self.exit_btn)
@@ -250,11 +260,11 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(control_group)
         
         # Opciones de ejecución y calidad de vida.
-        options_group = QGroupBox("Opciones")
+        options_group = QGroupBox(self.tr.t("options"))
         options_layout = QVBoxLayout()
         
         # Headless mode
-        self.headless_check = QCheckBox("Modo &Headless (sin interfaz de navegador)")
+        self.headless_check = QCheckBox(self.tr.t("headless_mode"))
         self.headless_check.setChecked(self.config_manager.get('headless', False))
         self.headless_check.stateChanged.connect(
             lambda s: self.config_manager.set('headless', s == Qt.CheckState.Checked.value)
@@ -262,7 +272,7 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(self.headless_check)
         
         # Auto-start
-        self.auto_start_check = QCheckBox("&Auto-iniciar proceso al abrir")
+        self.auto_start_check = QCheckBox(self.tr.t("auto_start"))
         self.auto_start_check.setChecked(self.config_manager.get('auto_start', False))
         self.auto_start_check.stateChanged.connect(
             lambda s: self.config_manager.set('auto_start', s == Qt.CheckState.Checked.value)
@@ -271,7 +281,7 @@ class MainWindow(QMainWindow):
         
         # Auto-close
         auto_close_layout = QHBoxLayout()
-        self.auto_close_check = QCheckBox("Auto-&cerrar después de")
+        self.auto_close_check = QCheckBox(self.tr.t("auto_close_after"))
         self.auto_close_check.setChecked(self.config_manager.get('auto_close_enabled', False))
         self.auto_close_check.stateChanged.connect(
             lambda s: self.config_manager.set('auto_close_enabled', s == Qt.CheckState.Checked.value)
@@ -285,7 +295,7 @@ class MainWindow(QMainWindow):
             lambda v: self.config_manager.set('auto_close_seconds', v)
         )
         auto_close_layout.addWidget(self.auto_close_spin)
-        auto_close_layout.addWidget(QLabel("segundos"))
+        auto_close_layout.addWidget(QLabel(self.tr.t("seconds")))
         auto_close_layout.addStretch()
         options_layout.addLayout(auto_close_layout)
         
@@ -293,19 +303,19 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(options_group)
         
         # Métricas visibles del ciclo de escaneo actual.
-        stats_group = QGroupBox("Estadísticas")
+        stats_group = QGroupBox(self.tr.t("statistics"))
         stats_layout = QHBoxLayout()
         
-        self.pending_label = QLabel("Pendientes: 0")
+        self.pending_label = QLabel(f"{self.tr.t('pending')}: 0")
         stats_layout.addWidget(self.pending_label)
         
-        self.processed_label = QLabel("Procesadas: 0")
+        self.processed_label = QLabel(f"{self.tr.t('processed')}: 0")
         stats_layout.addWidget(self.processed_label)
         
-        self.removed_label = QLabel("Eliminadas: 0")
+        self.removed_label = QLabel(f"{self.tr.t('removed')}: 0")
         stats_layout.addWidget(self.removed_label)
         
-        self.current_label = QLabel("Actual: -")
+        self.current_label = QLabel(f"{self.tr.t('current')}: -")
         stats_layout.addWidget(self.current_label)
         stats_layout.addStretch()
         
@@ -315,25 +325,36 @@ class MainWindow(QMainWindow):
         # Acciones manuales para guardar/restaurar la cola.
         state_layout = QHBoxLayout()
         
-        save_btn = QPushButton("&Guardar estado")
+        save_btn = QPushButton(self.tr.t("btn_save_state"))
         save_btn.setShortcut(QKeySequence("Ctrl+G"))
         save_btn.clicked.connect(self.save_state)
         state_layout.addWidget(save_btn)
         
-        load_btn = QPushButton("&Cargar estado")
+        load_btn = QPushButton(self.tr.t("btn_load_state"))
         load_btn.setShortcut(QKeySequence("Ctrl+L"))
         load_btn.clicked.connect(self.load_state)
         state_layout.addWidget(load_btn)
         
-        clear_btn = QPushButton("Limpiar estado")
+        clear_btn = QPushButton(self.tr.t("btn_clear_state"))
         clear_btn.clicked.connect(self.clear_state)
         state_layout.addWidget(clear_btn)
+        
+        # Botón de donación "Cómprame una cerveza".
+        donate_btn = QPushButton(self.tr.t("donate_beer"))
+        donate_btn.setStyleSheet(
+            "QPushButton { background-color: #FF9900; color: white; font-weight: bold; "
+            "padding: 4px 12px; border-radius: 4px; } "
+            "QPushButton:hover { background-color: #E68A00; }"
+        )
+        donate_btn.setToolTip("PayPal")
+        donate_btn.clicked.connect(lambda: webbrowser.open(DONATE_URL))
+        state_layout.addWidget(donate_btn)
         
         state_layout.addStretch()
         main_layout.addLayout(state_layout)
         
         # Cola editable de URLs fuente.
-        urls_group = QGroupBox("URLs (una por línea)")
+        urls_group = QGroupBox(self.tr.t("urls_group"))
         urls_layout = QVBoxLayout()
         self.urls_text = QTextEdit()
         self.urls_text.setPlainText(self.config_manager.get('urls', ''))
@@ -347,18 +368,18 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(urls_group)
 
         # Panel de preview: URL activa, screenshot y snippet textual.
-        preview_group = QGroupBox("Preview de URL")
+        preview_group = QGroupBox(self.tr.t("preview_group"))
         preview_layout = QVBoxLayout()
 
         preview_controls = QHBoxLayout()
         preview_controls.addWidget(QLabel("URL:"))
 
         self.preview_url_input = QLineEdit()
-        self.preview_url_input.setPlaceholderText("Selecciona o pega una URL para previsualizar")
+        self.preview_url_input.setPlaceholderText(self.tr.t("preview_placeholder"))
         self.preview_url_input.textChanged.connect(self.on_preview_url_changed)
         preview_controls.addWidget(self.preview_url_input)
 
-        self.preview_btn = QPushButton("Preview")
+        self.preview_btn = QPushButton(self.tr.t("preview_btn"))
         self.preview_btn.clicked.connect(self.preview_current_url)
         preview_controls.addWidget(self.preview_btn)
 
@@ -371,20 +392,20 @@ class MainWindow(QMainWindow):
         self.preview_image_label.setMinimumHeight(200)
         self.preview_image_label.setMaximumHeight(400)
         self.preview_image_label.setScaledContents(False)
-        self.preview_image_label.setText("La captura de pantalla aparecerá aquí")
+        self.preview_image_label.setText(self.tr.t("preview_screenshot_placeholder"))
         preview_layout.addWidget(self.preview_image_label)
 
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(100)
-        self.preview_text.setPlaceholderText("Aquí verás una vista rápida del título y contenido de la página")
+        self.preview_text.setPlaceholderText(self.tr.t("preview_text_placeholder"))
         preview_layout.addWidget(self.preview_text)
 
         preview_group.setLayout(preview_layout)
         main_layout.addWidget(preview_group)
         
         # Palabras clave que determinan si una URL se elimina de la cola.
-        keywords_group = QGroupBox("Palabras clave (una por línea o separadas por coma)")
+        keywords_group = QGroupBox(self.tr.t("keywords_group"))
         keywords_layout = QVBoxLayout()
         self.keywords_text = QTextEdit()
         self.keywords_text.setPlainText(self.config_manager.get('keywords', ''))
@@ -399,7 +420,9 @@ class MainWindow(QMainWindow):
         # Barra inferior para mensajes cortos de estado.
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage(f"EarnApp Reviewer {self.version} - Listo")
+        self.status_bar.showMessage(
+            f"{self.tr.t('window_title')} {self.version} - {self.tr.t('status_ready')}"
+        )
         
         # Set initial size from config
         window_config = self.config_manager.get('window', {})
@@ -412,35 +435,66 @@ class MainWindow(QMainWindow):
         self.schedule_preview_refresh(250)
     
     def create_menu_bar(self):
-        """Create menu bar."""
+        """Create menu bar with file, language and help menus."""
         menubar = self.menuBar()
         
-        # File menu
-        file_menu = menubar.addMenu("&Archivo")
+        # Menú Archivo
+        file_menu = menubar.addMenu(self.tr.t("menu_file"))
         
-        exit_action = QAction("&Salir", self)
+        exit_action = QAction(self.tr.t("menu_exit"), self)
         exit_action.setShortcut(QKeySequence("Ctrl+Q"))
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # Help menu
-        help_menu = menubar.addMenu("A&yuda")
+        # Menú Idioma — permite cambiar idioma sin reiniciar (requiere restart para full).
+        language_menu = menubar.addMenu(self.tr.t("menu_language"))
+        lang_group = QActionGroup(self)
+        lang_group.setExclusive(True)
+        for lang_code, lang_name in AVAILABLE_LANGUAGES.items():
+            action = QAction(lang_name, self)
+            action.setCheckable(True)
+            # Marcar el idioma activo actual.
+            if lang_code == self.tr.language:
+                action.setChecked(True)
+            # Conectar con lambda que captura lang_code correctamente.
+            action.triggered.connect(lambda checked, lc=lang_code: self.change_language(lc))
+            lang_group.addAction(action)
+            language_menu.addAction(action)
         
-        about_action = QAction("&Acerca de", self)
+        # Menú Ayuda
+        help_menu = menubar.addMenu(self.tr.t("menu_help"))
+        
+        about_action = QAction(self.tr.t("menu_about"), self)
         about_action.setShortcut(QKeySequence("F1"))
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+        
+        # Acción de donación en el menú de ayuda.
+        donate_action = QAction(self.tr.t("donate_beer"), self)
+        donate_action.triggered.connect(lambda: webbrowser.open(DONATE_URL))
+        help_menu.addAction(donate_action)
     
+    def change_language(self, lang_code: str):
+        """Persist language choice and notify the user to restart."""
+        self.config_manager.set('language', lang_code)
+        self.tr.language = lang_code
+        QMessageBox.information(
+            self,
+            self.tr.t("language_changed_title"),
+            self.tr.t("language_changed"),
+        )
+
     def show_about(self):
-        """Show about dialog."""
+        """Show about dialog with donation link."""
         year = datetime.now().year
         QMessageBox.about(
             self,
-            "Acerca de EarnApp Reviewer",
-            f"<h3>EarnApp Reviewer {self.version}</h3>"
-            f"<p>Creado por <b>Synyster Rick</b></p>"
-            f"<p>© {year} Todos los Derechos Reservados</p>"
+            self.tr.t("about_title"),
+            f"<h3>{self.tr.t('window_title')} {self.version}</h3>"
+            f"<p>{self.tr.t('about_created_by')} <b>Synyster Rick</b></p>"
+            f"<p>© {year} {self.tr.t('about_rights')}</p>"
             f"<p>Licencia: Apache License 2.0</p>"
+            f'<p><a href="{DONATE_URL}">{self.tr.t("donate_beer")}</a></p>'
         )
     
     def restore_window_position(self):
@@ -533,7 +587,7 @@ class MainWindow(QMainWindow):
         self.preview_url_input.setText(normalized)
         self.preview_url_input.blockSignals(False)
 
-    def _clear_preview_panel(self, message: str = "No hay URL para previsualizar"):
+    def _clear_preview_panel(self, message: str = ""):
         """
         Reset preview widgets when there is no active URL to render.
 
@@ -542,20 +596,20 @@ class MainWindow(QMainWindow):
         """
         self._last_preview_url = ""
         self._pending_preview_url = None
-        self.preview_text.setPlainText(message)
+        self.preview_text.setPlainText(message or self.tr.t("preview_no_url"))
         self.preview_image_label.clear()
-        self.preview_image_label.setText("La captura de pantalla aparecerá aquí")
+        self.preview_image_label.setText(self.tr.t("preview_screenshot_placeholder"))
 
     def update_progress(self, stats: dict):
         """Update progress display."""
-        self.pending_label.setText(f"Pendientes: {stats.get('pending', 0)}")
-        self.processed_label.setText(f"Procesadas: {stats.get('processed', 0)}")
-        self.removed_label.setText(f"Eliminadas: {stats.get('removed', 0)}")
+        self.pending_label.setText(f"{self.tr.t('pending')}: {stats.get('pending', 0)}")
+        self.processed_label.setText(f"{self.tr.t('processed')}: {stats.get('processed', 0)}")
+        self.removed_label.setText(f"{self.tr.t('removed')}: {stats.get('removed', 0)}")
         
         current = stats.get('current_url', '-')
         if len(current) > 50:
             current = current[:47] + '...'
-        self.current_label.setText(f"Actual: {current}")
+        self.current_label.setText(f"{self.tr.t('current')}: {current}")
 
         current_url = stats.get('current_url', '').strip()
         if current_url and current_url != '-':
@@ -603,7 +657,7 @@ class MainWindow(QMainWindow):
                 self._set_preview_url_input(target_url)
 
         if not target_url:
-            self.status_bar.showMessage("No hay URL para previsualizar")
+            self.status_bar.showMessage(self.tr.t("preview_no_url"))
             self._clear_preview_panel()
             return
 
@@ -617,9 +671,9 @@ class MainWindow(QMainWindow):
         self._preview_loading = True
         self._pending_preview_url = None
         self._last_preview_url = target_url
-        self.preview_text.setPlainText("Cargando preview...")
+        self.preview_text.setPlainText(self.tr.t("preview_loading"))
         self.preview_image_label.setPixmap(QPixmap())
-        self.preview_image_label.setText("Cargando vista en miniatura...")
+        self.preview_image_label.setText(self.tr.t("preview_loading_thumbnail"))
         asyncio.ensure_future(self._load_preview_async(target_url))
 
     async def _load_preview_async(self, url: str):
@@ -652,13 +706,13 @@ class MainWindow(QMainWindow):
                     )
                     self.preview_image_label.setPixmap(scaled_pixmap)
                 else:
-                    self.preview_image_label.setText("No se pudo capturar la captura de pantalla")
+                    self.preview_image_label.setText(self.tr.t("preview_no_screenshot"))
                 
-                self.status_bar.showMessage("Preview actualizado")
+                self.status_bar.showMessage(self.tr.t("preview_updated"))
             except Exception as e:
-                self.preview_text.setPlainText(f"Error cargando preview: {str(e)}")
-                self.preview_image_label.setText("Error capturando imagen")
-                self.status_bar.showMessage("Error en preview")
+                self.preview_text.setPlainText(self.tr.t("preview_error_loading", error=str(e)))
+                self.preview_image_label.setText(self.tr.t("preview_error_image"))
+                self.status_bar.showMessage(self.tr.t("preview_error"))
             finally:
                 self._preview_loading = False
                 if self._pending_preview_url and self._pending_preview_url != self._last_preview_url:
@@ -667,7 +721,7 @@ class MainWindow(QMainWindow):
     def start_auth_session(self):
         """Open interactive browser session to login and persist auth state."""
         if self._auth_in_progress:
-            self.status_bar.showMessage("La sesión de autenticación ya está en curso")
+            self.status_bar.showMessage(self.tr.t("auth_in_progress"))
             return
 
         # BUG FIX: Siempre abrir earnapp.com/dashboard para autenticación.
@@ -681,16 +735,16 @@ class MainWindow(QMainWindow):
         if self.backend.is_running:
             self._auth_after_stop_requested = True
             self._auth_pending_url = target_url
-            self.auth_btn.setText("Iniciar sesión (en cola...)")
+            self.auth_btn.setText(self.tr.t("auth_queued"))
             self.auth_btn.setEnabled(False)
             self.stop_scan()
-            self.status_bar.showMessage("Deteniendo escaneo para iniciar sesión automáticamente...")
+            self.status_bar.showMessage(self.tr.t("auth_stopping_for_login"))
             return
 
         self._auth_in_progress = True
-        self.auth_btn.setText("Iniciar sesión")
+        self.auth_btn.setText(self.tr.t("btn_login"))
         self.auth_btn.setEnabled(False)
-        self.status_bar.showMessage("Abriendo navegador para iniciar sesión...")
+        self.status_bar.showMessage(self.tr.t("auth_opening_browser"))
         asyncio.ensure_future(self._run_auth_session_async(target_url))
 
     async def _run_auth_session_async(self, target_url: str):
@@ -698,29 +752,28 @@ class MainWindow(QMainWindow):
         try:
             QMessageBox.information(
                 self,
-                "Autenticación",
-                "Se abrirá una ventana de navegador para iniciar sesión.\n"
-                "Completa el login y cierra esa ventana para guardar la sesión."
+                self.tr.t("auth_dialog_title"),
+                self.tr.t("auth_dialog_message"),
             )
             ok = await self.backend.run_interactive_auth_session(target_url, timeout_seconds=240)
             if ok:
-                self.status_bar.showMessage("Sesión actualizada. Refrescando preview...")
+                self.status_bar.showMessage(self.tr.t("auth_session_updated"))
                 self._last_preview_url = ""
                 self.sync_preview_url_from_list(force=True)
                 self.schedule_preview_refresh(100)
             else:
-                self.status_bar.showMessage("No se pudo completar la autenticación")
+                self.status_bar.showMessage(self.tr.t("auth_failed"))
         except Exception as e:
-            self.status_bar.showMessage(f"Error en autenticación: {str(e)}")
+            self.status_bar.showMessage(self.tr.t("auth_error", error=str(e)))
         finally:
             self._auth_in_progress = False
-            self.auth_btn.setText("Iniciar sesión")
+            self.auth_btn.setText(self.tr.t("btn_login"))
             self.auth_btn.setEnabled(True)
     
     def start_scan(self):
         """Start scanning process."""
         if self.backend.is_running:
-            self.status_bar.showMessage("El escaneo ya está en ejecución")
+            self.status_bar.showMessage(self.tr.t("status_scan_running"))
             return
         
         # Get URLs and keywords
@@ -731,11 +784,11 @@ class MainWindow(QMainWindow):
         keywords = self.backend.normalize_keywords(keywords_text)
         
         if not urls:
-            self.status_bar.showMessage("No hay URLs válidas para procesar")
+            self.status_bar.showMessage(self.tr.t("status_no_valid_urls"))
             return
         
         if not keywords:
-            self.status_bar.showMessage("No hay palabras clave válidas")
+            self.status_bar.showMessage(self.tr.t("status_no_valid_keywords"))
             return
 
         # Reescribe lista normalizada para evitar duplicados y persistir
@@ -750,7 +803,7 @@ class MainWindow(QMainWindow):
         # Update UI
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        self.status_bar.showMessage(f"Iniciando escaneo de {len(urls)} URLs...")
+        self.status_bar.showMessage(self.tr.t("status_scanning", count=len(urls)))
         
         # Start auto-close timer if enabled
         if self.auto_close_check.isChecked():
@@ -781,9 +834,9 @@ class MainWindow(QMainWindow):
                 self._auth_after_stop_requested = False
                 self._auth_pending_url = ""
                 self._auth_in_progress = True
-                self.auth_btn.setText("Iniciar sesión")
+                self.auth_btn.setText(self.tr.t("btn_login"))
                 self.auth_btn.setEnabled(False)
-                self.status_bar.showMessage("Abriendo navegador para iniciar sesión...")
+                self.status_bar.showMessage(self.tr.t("auth_opening_browser"))
                 asyncio.ensure_future(self._run_auth_session_async(pending_url))
     
     def on_scan_finished(self):
@@ -792,16 +845,16 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self._last_runtime_preview_url = ""
         if self._auth_after_stop_requested:
-            self.status_bar.showMessage("Escaneo detenido. Iniciando sesión...")
+            self.status_bar.showMessage(self.tr.t("status_scan_stopped_auth"))
         else:
             self.sync_preview_url_from_list(force=True)
-            self.status_bar.showMessage("Escaneo finalizado")
+            self.status_bar.showMessage(self.tr.t("status_scan_finished"))
     
     def stop_scan(self):
         """Stop scanning process."""
         if self.backend.is_running:
             self.backend.stop()
-            self.status_bar.showMessage("Deteniendo escaneo...")
+            self.status_bar.showMessage(self.tr.t("status_stopping"))
             self.stop_btn.setEnabled(False)
             
             # Stop auto-close timer
@@ -814,7 +867,7 @@ class MainWindow(QMainWindow):
         if self.auto_close_countdown > 0:
             self.auto_close_countdown -= 1
             self.status_bar.showMessage(
-                f"Auto-cierre en {self.auto_close_countdown} segundos..."
+                self.tr.t("status_auto_close", seconds=self.auto_close_countdown)
             )
         else:
             self.auto_close_timer.stop()
@@ -825,7 +878,7 @@ class MainWindow(QMainWindow):
         urls = self.backend.normalize_urls(self.urls_text.toPlainText())
         keywords = self.backend.normalize_keywords(self.keywords_text.toPlainText())
         self.backend.save_state(urls, keywords)
-        self.status_bar.showMessage("Estado guardado correctamente")
+        self.status_bar.showMessage(self.tr.t("status_state_saved"))
     
     def load_state(self):
         """Load saved state."""
@@ -841,15 +894,15 @@ class MainWindow(QMainWindow):
             stats = state.get('stats', {})
             self.update_progress(stats)
             
-            self.status_bar.showMessage("Estado cargado correctamente")
+            self.status_bar.showMessage(self.tr.t("status_state_loaded"))
         else:
-            self.status_bar.showMessage("No hay estado guardado")
+            self.status_bar.showMessage(self.tr.t("status_no_saved_state"))
     
     def clear_state(self):
         """Clear saved state."""
         self.backend.clear_state()
         self.sync_preview_url_from_list(force=True)
-        self.status_bar.showMessage("Estado limpiado correctamente")
+        self.status_bar.showMessage(self.tr.t("status_state_cleared"))
     
     def closeEvent(self, event):
         """Handle window close event."""
@@ -857,8 +910,8 @@ class MainWindow(QMainWindow):
         if self.backend.is_running:
             reply = QMessageBox.question(
                 self,
-                'Escaneo en progreso',
-                '¿Estás seguro de que quieres cerrar? El escaneo se detendrá.',
+                self.tr.t('close_dialog_title'),
+                self.tr.t('close_dialog_message'),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
